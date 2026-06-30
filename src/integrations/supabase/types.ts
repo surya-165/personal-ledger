@@ -451,6 +451,7 @@ export type Database = {
           destination_account_id: string | null
           fund_id: string | null
           id: string
+          payment_mode: string | null
           reserve_id: string | null
           type: Database["public"]["Enums"]["transaction_type"]
           updated_at: string
@@ -466,6 +467,7 @@ export type Database = {
           destination_account_id?: string | null
           fund_id?: string | null
           id?: string
+          payment_mode?: string | null
           reserve_id?: string | null
           type: Database["public"]["Enums"]["transaction_type"]
           updated_at?: string
@@ -481,6 +483,7 @@ export type Database = {
           destination_account_id?: string | null
           fund_id?: string | null
           id?: string
+          payment_mode?: string | null
           reserve_id?: string | null
           type?: Database["public"]["Enums"]["transaction_type"]
           updated_at?: string
