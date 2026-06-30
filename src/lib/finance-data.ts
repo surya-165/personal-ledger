@@ -154,6 +154,18 @@ export const transactions: Transaction[] = [
   { id: "t14", date: "2026-05-12", type: "expense", account: "CUB", category: "Shopping", description: "Linen shirt", amount: -2100 },
 ];
 
+// Fixed monthly commitments paid from HDFC (Car EMI, Maintenance).
+transactions.push(
+  { id: "t15", date: "2026-06-07", type: "expense", account: "HDFC", category: "Fixed", description: "Car EMI", amount: -14500 },
+  { id: "t16", date: "2026-06-07", type: "expense", account: "HDFC", category: "Fixed", description: "Apartment Maintenance", amount: -4800 },
+);
+
+export const currentMonth = "2026-06";
+
+export function isInMonth(dateISO: string, ym: string = currentMonth): boolean {
+  return dateISO.startsWith(ym);
+}
+
 export const monthlyIncome = 120000 + 28000 - 3000; // salary + net rent (after maintenance, illustrative)
 
 export function formatINR(n: number): string {
