@@ -9,11 +9,17 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as InvestmentsRouteImport } from './routes/investments'
 import { Route as FundsRouteImport } from './routes/funds'
 import { Route as BudgetsRouteImport } from './routes/budgets'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as IndexRouteImport } from './routes/index'
 
+const InvestmentsRoute = InvestmentsRouteImport.update({
+  id: '/investments',
+  path: '/investments',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FundsRoute = FundsRouteImport.update({
   id: '/funds',
   path: '/funds',
@@ -40,12 +46,14 @@ export interface FileRoutesByFullPath {
   '/accounts': typeof AccountsRoute
   '/budgets': typeof BudgetsRoute
   '/funds': typeof FundsRoute
+  '/investments': typeof InvestmentsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
   '/budgets': typeof BudgetsRoute
   '/funds': typeof FundsRoute
+  '/investments': typeof InvestmentsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,14 @@ export interface FileRoutesById {
   '/accounts': typeof AccountsRoute
   '/budgets': typeof BudgetsRoute
   '/funds': typeof FundsRoute
+  '/investments': typeof InvestmentsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/accounts' | '/budgets' | '/funds'
+  fullPaths: '/' | '/accounts' | '/budgets' | '/funds' | '/investments'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/accounts' | '/budgets' | '/funds'
-  id: '__root__' | '/' | '/accounts' | '/budgets' | '/funds'
+  to: '/' | '/accounts' | '/budgets' | '/funds' | '/investments'
+  id: '__root__' | '/' | '/accounts' | '/budgets' | '/funds' | '/investments'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,10 +76,18 @@ export interface RootRouteChildren {
   AccountsRoute: typeof AccountsRoute
   BudgetsRoute: typeof BudgetsRoute
   FundsRoute: typeof FundsRoute
+  InvestmentsRoute: typeof InvestmentsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/investments': {
+      id: '/investments'
+      path: '/investments'
+      fullPath: '/investments'
+      preLoaderRoute: typeof InvestmentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/funds': {
       id: '/funds'
       path: '/funds'
@@ -107,6 +124,7 @@ const rootRouteChildren: RootRouteChildren = {
   AccountsRoute: AccountsRoute,
   BudgetsRoute: BudgetsRoute,
   FundsRoute: FundsRoute,
+  InvestmentsRoute: InvestmentsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
