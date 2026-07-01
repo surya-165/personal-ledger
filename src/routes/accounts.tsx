@@ -1,5 +1,14 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { accounts, formatINR, transactions, isInMonth, currentMonth } from "@/lib/finance-data";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/use-auth";
+import {
+  fetchAll,
+  formatINR,
+  computeAccountBalances,
+  computeFundBalance,
+  computeReserveBalance,
+} from "@/lib/finance-db";
 import { PageHeader } from "@/components/finance/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -13,25 +22,81 @@ export const Route = createFileRoute("/accounts")({
   component: AccountsPage,
 });
 
+function currentMonthKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function AccountsPage() {
-  const monthLabel = new Date(currentMonth + "-01").toLocaleDateString("en-IN", {
+  const { session, user, loading } = useAuth();
+  const navigate = useNavigate();
+  useEffect(() => { if (!loading && !session) navigate({ to: "/auth" }); }, [loading, session, navigate]);
+
+  const q = useQuery({
+    queryKey: ["finance", user?.id],
+    enabled: !!user,
+    queryFn: () => fetchAll(user!.id),
+  });
+
+  const ym = currentMonthKey();
+  const monthLabel = new Date(ym + "-01").toLocaleDateString("en-IN", {
     month: "long",
     year: "numeric",
   });
+
+  const view = useMemo(() => {
+    if (!q.data) return [];
+    const { accounts, transactions, reserves, funds } = q.data;
+    const balances = computeAccountBalances(accounts, transactions);
+    return accounts.map((a) => {
+      // Reserved = reserves attached to this account + fund balances held in this account
+      const acctReserves = reserves
+        .filter((r) => r.account_id === a.id)
+        .map((r) => ({ label: r.name, amount: computeReserveBalance(r, transactions) }));
+      const acctFunds = funds
+        .filter((f) => f.account_id === a.id)
+        .map((f) => ({ label: f.name, amount: computeFundBalance(f, transactions) }));
+      const breakdown = [...acctReserves, ...acctFunds].filter((r) => r.amount > 0);
+      const reserved = breakdown.reduce((s, r) => s + r.amount, 0);
+      const balance = balances[a.id] ?? 0;
+      const usable = balance - reserved;
+
+      // Monthly flow: sum in/out affecting this account this month
+      let inflow = 0;
+      let outflow = 0;
+      for (const t of transactions) {
+        if (!t.date.startsWith(ym)) continue;
+        const amt = Number(t.amount);
+        if (t.type === "income" || t.type === "fund_withdrawal") {
+          if (t.account_id === a.id) inflow += amt;
+        } else if (t.type === "expense" || t.type === "fund_contribution") {
+          if (t.account_id === a.id) outflow += amt;
+        } else if (t.type === "transfer") {
+          if (t.account_id === a.id) outflow += amt;
+          if (t.destination_account_id === a.id) inflow += amt;
+        }
+        // reserve_accrual: earmark only — does not change balance
+      }
+      return { a, balance, reserved, usable, breakdown, inflow, outflow, net: inflow - outflow };
+    });
+  }, [q.data, ym]);
+
+  if (loading || !session) return <div className="text-sm text-muted-foreground">Loading…</div>;
+
   return (
     <div>
       <PageHeader
         title="Accounts"
         description={`Balances, reserved portions, and this month's flow (${monthLabel}).`}
       />
+      {q.isLoading ? (
+        <div className="text-sm text-muted-foreground">Loading accounts…</div>
+      ) : view.length === 0 ? (
+        <div className="text-sm text-muted-foreground">No accounts yet. Complete Setup first.</div>
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-        {accounts.map((a) => {
-          const usable = a.balance - a.reserved;
-          const reservedPct = a.balance > 0 ? (a.reserved / a.balance) * 100 : 0;
-          const monthTx = transactions.filter((t) => t.account === a.id && isInMonth(t.date));
-          const inflow = monthTx.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-          const outflow = -monthTx.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0);
-          const net = inflow - outflow;
+        {view.map(({ a, balance, reserved, usable, breakdown, inflow, outflow, net }) => {
+          const reservedPct = balance > 0 ? Math.max(0, Math.min(100, (reserved / balance) * 100)) : 0;
           return (
             <Card key={a.id}>
               <CardHeader>
@@ -45,7 +110,7 @@ function AccountsPage() {
                   {formatINR(usable)}
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Usable · {formatINR(a.balance)} total
+                  Usable · {formatINR(balance)} total
                 </div>
                 <div className="mt-5 h-2 w-full rounded-full bg-muted overflow-hidden flex">
                   <div className="h-full bg-primary/70" style={{ width: `${100 - reservedPct}%` }} />
@@ -54,20 +119,20 @@ function AccountsPage() {
                 <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <div className="text-xs text-muted-foreground">Total balance</div>
-                    <div className="tabular-nums font-medium">{formatINR(a.balance)}</div>
+                    <div className="tabular-nums font-medium">{formatINR(balance)}</div>
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">Reserved</div>
-                    <div className="tabular-nums font-medium">{formatINR(a.reserved)}</div>
+                    <div className="tabular-nums font-medium">{formatINR(reserved)}</div>
                   </div>
                 </div>
-                {a.reservedBreakdown.length > 0 ? (
+                {breakdown.length > 0 ? (
                   <div className="mt-5 border-t border-border pt-4">
                     <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
                       Reserved breakdown
                     </div>
                     <ul className="space-y-1.5 text-sm">
-                      {a.reservedBreakdown.map((r) => (
+                      {breakdown.map((r) => (
                         <li key={r.label} className="flex justify-between">
                           <span className="text-muted-foreground">{r.label}</span>
                           <span className="tabular-nums">{formatINR(r.amount)}</span>
@@ -109,6 +174,7 @@ function AccountsPage() {
           );
         })}
       </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { funds, formatINR } from "@/lib/finance-data";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/use-auth";
+import { fetchAll, formatINR } from "@/lib/finance-db";
 import { PageHeader } from "@/components/finance/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -15,13 +18,77 @@ export const Route = createFileRoute("/funds")({
   component: FundsPage,
 });
 
+function currentMonthKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function FundsPage() {
+  const { session, user, loading } = useAuth();
+  const navigate = useNavigate();
+  useEffect(() => { if (!loading && !session) navigate({ to: "/auth" }); }, [loading, session, navigate]);
+
+  const q = useQuery({
+    queryKey: ["finance", user?.id],
+    enabled: !!user,
+    queryFn: () => fetchAll(user!.id),
+  });
+
+  const ym = currentMonthKey();
+
+  const view = useMemo(() => {
+    if (!q.data) return [];
+    const { funds, transactions } = q.data;
+    return funds.map((f) => {
+      // Fund entries: contributions/withdrawals for this fund, chronological ascending for running balance
+      const entries = transactions
+        .filter((t) => t.fund_id === f.id && (t.type === "fund_contribution" || t.type === "fund_withdrawal"))
+        .slice()
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      let running = Number(f.opening_balance);
+      const withRunning = entries.map((t) => {
+        const amt = Number(t.amount);
+        if (t.type === "fund_contribution") running += amt;
+        else running -= amt;
+        return {
+          id: t.id,
+          date: t.date,
+          kind: t.type === "fund_contribution" ? "contribution" as const : "withdrawal" as const,
+          amount: amt,
+          description: t.description || (t.type === "fund_contribution" ? "Contribution" : "Withdrawal"),
+          running,
+        };
+      });
+      const balance = running;
+      const contributedThisMonth = withRunning
+        .filter((e) => e.kind === "contribution" && e.date.startsWith(ym))
+        .reduce((s, e) => s + e.amount, 0);
+
+      return {
+        id: f.id,
+        name: f.name,
+        monthlyTarget: Number(f.monthly_target),
+        balance,
+        contributedThisMonth,
+        ledger: withRunning.slice().reverse(), // newest first
+      };
+    });
+  }, [q.data, ym]);
+
+  if (loading || !session) return <div className="text-sm text-muted-foreground">Loading…</div>;
+
   return (
     <div>
       <PageHeader title="Goal funds" description="Both funds live inside SBI. Withdrawals are excluded from monthly income." />
+      {q.isLoading ? (
+        <div className="text-sm text-muted-foreground">Loading funds…</div>
+      ) : view.length === 0 ? (
+        <div className="text-sm text-muted-foreground">No funds configured. Complete Setup first.</div>
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {funds.map((f) => {
-          const pct = Math.min(100, Math.round((f.contributedThisMonth / f.monthlyTarget) * 100));
+        {view.map((f) => {
+          const pct = f.monthlyTarget > 0 ? Math.min(100, Math.round((f.contributedThisMonth / f.monthlyTarget) * 100)) : 0;
           return (
             <Card key={f.id}>
               <CardHeader>
@@ -44,9 +111,12 @@ function FundsPage() {
                 </div>
                 <div className="mt-6">
                   <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Ledger</div>
+                  {f.ledger.length === 0 ? (
+                    <div className="text-sm text-muted-foreground py-2">No contributions or withdrawals yet.</div>
+                  ) : (
                   <ul className="divide-y divide-border">
-                    {f.ledger.map((e, i) => (
-                      <li key={i} className="py-2.5 flex items-center justify-between gap-3">
+                    {f.ledger.map((e) => (
+                      <li key={e.id} className="py-2.5 flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <div className="text-sm truncate">{e.description}</div>
                           <div className="text-xs text-muted-foreground">{e.date}</div>
@@ -78,12 +148,14 @@ function FundsPage() {
                       </li>
                     ))}
                   </ul>
+                  )}
                 </div>
               </CardContent>
             </Card>
           );
         })}
       </div>
+      )}
     </div>
   );
 }
