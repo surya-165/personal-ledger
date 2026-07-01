@@ -44,7 +44,7 @@ function FundsPage() {
       const entries = transactions
         .filter((t) => t.fund_id === f.id && (t.type === "fund_contribution" || t.type === "fund_withdrawal"))
         .slice()
-        .sort((a, b) => (a.date === b.date ? a.created_at?.localeCompare?.(b.created_at ?? "") ?? 0 : a.date.localeCompare(b.date)));
+        .sort((a, b) => a.date.localeCompare(b.date));
 
       let running = Number(f.opening_balance);
       const withRunning = entries.map((t) => {
