@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TransactionsRouteImport } from './routes/transactions'
+import { Route as SetupRouteImport } from './routes/setup'
 import { Route as InvestmentsRouteImport } from './routes/investments'
 import { Route as FundsRouteImport } from './routes/funds'
 import { Route as BudgetsRouteImport } from './routes/budgets'
@@ -20,6 +21,11 @@ import { Route as IndexRouteImport } from './routes/index'
 const TransactionsRoute = TransactionsRouteImport.update({
   id: '/transactions',
   path: '/transactions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InvestmentsRoute = InvestmentsRouteImport.update({
@@ -60,6 +66,7 @@ export interface FileRoutesByFullPath {
   '/budgets': typeof BudgetsRoute
   '/funds': typeof FundsRoute
   '/investments': typeof InvestmentsRoute
+  '/setup': typeof SetupRoute
   '/transactions': typeof TransactionsRoute
 }
 export interface FileRoutesByTo {
@@ -69,6 +76,7 @@ export interface FileRoutesByTo {
   '/budgets': typeof BudgetsRoute
   '/funds': typeof FundsRoute
   '/investments': typeof InvestmentsRoute
+  '/setup': typeof SetupRoute
   '/transactions': typeof TransactionsRoute
 }
 export interface FileRoutesById {
@@ -79,6 +87,7 @@ export interface FileRoutesById {
   '/budgets': typeof BudgetsRoute
   '/funds': typeof FundsRoute
   '/investments': typeof InvestmentsRoute
+  '/setup': typeof SetupRoute
   '/transactions': typeof TransactionsRoute
 }
 export interface FileRouteTypes {
@@ -90,6 +99,7 @@ export interface FileRouteTypes {
     | '/budgets'
     | '/funds'
     | '/investments'
+    | '/setup'
     | '/transactions'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -99,6 +109,7 @@ export interface FileRouteTypes {
     | '/budgets'
     | '/funds'
     | '/investments'
+    | '/setup'
     | '/transactions'
   id:
     | '__root__'
@@ -108,6 +119,7 @@ export interface FileRouteTypes {
     | '/budgets'
     | '/funds'
     | '/investments'
+    | '/setup'
     | '/transactions'
   fileRoutesById: FileRoutesById
 }
@@ -118,6 +130,7 @@ export interface RootRouteChildren {
   BudgetsRoute: typeof BudgetsRoute
   FundsRoute: typeof FundsRoute
   InvestmentsRoute: typeof InvestmentsRoute
+  SetupRoute: typeof SetupRoute
   TransactionsRoute: typeof TransactionsRoute
 }
 
@@ -128,6 +141,13 @@ declare module '@tanstack/react-router' {
       path: '/transactions'
       fullPath: '/transactions'
       preLoaderRoute: typeof TransactionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/investments': {
@@ -182,6 +202,7 @@ const rootRouteChildren: RootRouteChildren = {
   BudgetsRoute: BudgetsRoute,
   FundsRoute: FundsRoute,
   InvestmentsRoute: InvestmentsRoute,
+  SetupRoute: SetupRoute,
   TransactionsRoute: TransactionsRoute,
 }
 export const routeTree = rootRouteImport
