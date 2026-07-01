@@ -50,6 +50,45 @@ export type Database = {
         }
         Relationships: []
       }
+      budget_plan: {
+        Row: {
+          created_at: string
+          id: string
+          planned_car_emi: number
+          planned_corpus_contribution: number
+          planned_maintenance: number
+          planned_monthly_income: number
+          planned_tax_reserve: number
+          planned_trip_contribution: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          planned_car_emi?: number
+          planned_corpus_contribution?: number
+          planned_maintenance?: number
+          planned_monthly_income?: number
+          planned_tax_reserve?: number
+          planned_trip_contribution?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          planned_car_emi?: number
+          planned_corpus_contribution?: number
+          planned_maintenance?: number
+          planned_monthly_income?: number
+          planned_tax_reserve?: number
+          planned_trip_contribution?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       categories: {
         Row: {
           created_at: string
