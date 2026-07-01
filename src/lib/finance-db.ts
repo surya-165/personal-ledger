@@ -65,33 +65,22 @@ export async function seedIfEmpty(userId: string) {
   const { data: acc, error: aErr } = await supabase
     .from("accounts")
     .insert([
-      { user_id: userId, code: "HDFC", name: "HDFC", role: "Salary · pays commitments & transfers", opening_balance: 80000, opening_date: today },
-      { user_id: userId, code: "CUB",  name: "CUB",  role: "Daily spending",                          opening_balance: 21000, opening_date: today },
-      { user_id: userId, code: "SBI",  name: "SBI",  role: "Accumulation · rental + goal funds",       opening_balance: 410000, opening_date: today },
+      { user_id: userId, code: "HDFC", name: "HDFC", role: "Salary · pays commitments & transfers", opening_balance: 0, opening_date: today },
+      { user_id: userId, code: "CUB",  name: "CUB",  role: "Daily spending",                          opening_balance: 0, opening_date: today },
+      { user_id: userId, code: "SBI",  name: "SBI",  role: "Accumulation · rental + goal funds",       opening_balance: 0, opening_date: today },
     ])
     .select("id,code");
   if (aErr) throw aErr;
   const byCode = Object.fromEntries((acc ?? []).map((a) => [a.code, a.id])) as Record<string, string>;
 
-  await supabase.from("categories").insert([
-    { user_id: userId, name: "Groceries",         monthly_limit: 12000, sort_order: 1 },
-    { user_id: userId, name: "Food & Eating Out", monthly_limit: 8000,  sort_order: 2 },
-    { user_id: userId, name: "Commute",           monthly_limit: 4500,  sort_order: 3 },
-    { user_id: userId, name: "Utilities",         monthly_limit: 5500,  sort_order: 4 },
-    { user_id: userId, name: "Subscriptions",     monthly_limit: 2500,  sort_order: 5 },
-    { user_id: userId, name: "Shopping",          monthly_limit: 6000,  sort_order: 6 },
-    { user_id: userId, name: "Travel",            monthly_limit: 5000,  sort_order: 7 },
-    { user_id: userId, name: "Fixed",             monthly_limit: 22000, sort_order: 8 },
-  ]);
-
   await supabase.from("reserves").insert([
-    { user_id: userId, account_id: byCode.CUB, name: "CUB Floor",   kind: "floor",   amount: 10000, monthly_accrual: null },
-    { user_id: userId, account_id: byCode.SBI, name: "Tax Reserve", kind: "accrual", amount: 0,     monthly_accrual: 4200 },
+    { user_id: userId, account_id: byCode.CUB, name: "CUB Floor",   kind: "floor",   amount: 0, monthly_accrual: null },
+    { user_id: userId, account_id: byCode.SBI, name: "Tax Reserve", kind: "accrual", amount: 0, monthly_accrual: 0 },
   ]);
 
   await supabase.from("funds").insert([
-    { user_id: userId, account_id: byCode.SBI, code: "corpus", name: "Corpus Fund", monthly_target: 25000, opening_balance: 0 },
-    { user_id: userId, account_id: byCode.SBI, code: "trip",   name: "Trip Fund",   monthly_target: 12000, opening_balance: 0 },
+    { user_id: userId, account_id: byCode.SBI, code: "corpus", name: "Corpus Fund", monthly_target: 0, opening_balance: 0 },
+    { user_id: userId, account_id: byCode.SBI, code: "trip",   name: "Trip Fund",   monthly_target: 0, opening_balance: 0 },
   ]);
 }
 

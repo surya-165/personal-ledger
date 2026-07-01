@@ -6,6 +6,7 @@ import {
   PiggyBank,
   Target,
   TrendingUp,
+  Settings,
 } from "lucide-react";
 
 import {
@@ -27,6 +28,7 @@ const items = [
   { title: "Funds", url: "/funds", icon: PiggyBank },
   { title: "Budgets", url: "/budgets", icon: Target },
   { title: "Investments", url: "/investments", icon: TrendingUp },
+  { title: "Setup", url: "/setup", icon: Settings },
 ] as const;
 
 export function AppSidebar() {
