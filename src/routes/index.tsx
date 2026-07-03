@@ -10,6 +10,7 @@ import {
 import { PageHeader } from "@/components/finance/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { RecurringPanel } from "@/components/finance/recurring-panel";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -53,6 +54,8 @@ function Dashboard() {
         title={monthLabel}
         description={`Day ${dayOfMonth} of ${daysInMonth} · where this month's income is going.`}
       />
+
+      <RecurringPanel />
 
       {/* Headline: monthly income */}
       <Card className="mb-8">
