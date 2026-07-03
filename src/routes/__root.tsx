@@ -80,14 +80,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
+      { title: "Kanakku" },
+      { name: "description", content: "My Money Flow tracks personal finances, including bank accounts, budgets, savings goals, and investments." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { property: "og:title", content: "Kanakku" },
+      { property: "og:description", content: "My Money Flow tracks personal finances, including bank accounts, budgets, savings goals, and investments." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "Kanakku" },
+      { name: "twitter:description", content: "My Money Flow tracks personal finances, including bank accounts, budgets, savings goals, and investments." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/cbcc6599-2f69-428e-a8ab-97056848049a/id-preview-2e5444f6--e086f00f-a1ed-4c21-a4f3-fbad91948a27.lovable.app-1783060013623.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/cbcc6599-2f69-428e-a8ab-97056848049a/id-preview-2e5444f6--e086f00f-a1ed-4c21-a4f3-fbad91948a27.lovable.app-1783060013623.png" },
     ],
     links: [
       {
