@@ -139,7 +139,7 @@ function Dashboard() {
             <div className="flex items-baseline justify-between">
               <CardTitle className="text-base font-medium">Spend vs budget</CardTitle>
               <span className="text-xs text-muted-foreground tabular-nums">
-                {formatINR(variableSpent)} / {formatINR(variableLimit)}
+                {formatINR(expensesOut)} / {formatINR(variableLimit)}
               </span>
             </div>
           </CardHeader>
