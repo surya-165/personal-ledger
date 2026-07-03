@@ -1,7 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { fetchAll, seedIfEmpty, formatINR } from "@/lib/finance-db";
 import { PageHeader } from "@/components/finance/page-header";
@@ -90,7 +89,6 @@ function Dashboard() {
   if (dataQuery.isLoading || !data) return <div className="text-sm text-muted-foreground">Loading dashboard…</div>;
 
   const remainderMissing = Math.abs(unallocated) > 0.5;
-  void supabase; // ensure tree-shake doesn't drop; used elsewhere via imports
 
   return (
     <div>
