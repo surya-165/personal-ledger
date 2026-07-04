@@ -6,6 +6,7 @@ import {
   PiggyBank,
   Target,
   TrendingUp,
+  HandCoins,
   Settings,
 } from "lucide-react";
 
@@ -28,6 +29,7 @@ const items = [
   { title: "Funds", url: "/funds", icon: PiggyBank },
   { title: "Budgets", url: "/budgets", icon: Target },
   { title: "Investments", url: "/investments", icon: TrendingUp },
+  { title: "Loans", url: "/loans", icon: HandCoins },
   { title: "Setup", url: "/setup", icon: Settings },
 ] as const;
 
