@@ -56,7 +56,7 @@ function Dashboard() {
     monthTx.filter(pred).reduce((s, t) => s + Number(t.amount), 0);
 
   const income = sumOf((t) => t.type === "income");
-  const expensesOut = sumOf((t) => t.type === "expense");
+  const expensesOut = sumOf((t) => t.type === "expense" || t.type === "internal_loan_repayment");
   const reserveOut = sumOf((t) => t.type === "reserve_accrual");
   const fundsOut = sumOf((t) => t.type === "fund_contribution");
   // Own-account transfers net to zero across the household; show gross for context.
@@ -69,7 +69,7 @@ function Dashboard() {
   const spentByCategory = useMemo(() => {
     const m: Record<string, number> = {};
     for (const t of monthTx) {
-      if (t.type !== "expense" || !t.category_id) continue;
+      if ((t.type !== "expense" && t.type !== "internal_loan_repayment") || !t.category_id) continue;
       m[t.category_id] = (m[t.category_id] ?? 0) + Number(t.amount);
     }
     return m;
