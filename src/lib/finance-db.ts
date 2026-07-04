@@ -6,7 +6,10 @@ export type TxType =
   | "transfer"
   | "fund_contribution"
   | "fund_withdrawal"
-  | "reserve_accrual";
+  | "reserve_accrual"
+  | "loan_given"
+  | "loan_received"
+  | "internal_loan_repayment";
 
 export interface AccountRow {
   id: string;
@@ -30,17 +33,35 @@ export interface TxRow {
   description: string;
   amount: number;
   payment_mode: string | null;
+  loan_id?: string | null;
+}
+
+export type LoanKind = "external" | "internal";
+export type LoanStatus = "active" | "settled";
+export interface LoanRow {
+  id: string;
+  loan_type: LoanKind;
+  name: string;
+  borrower_name: string | null;
+  disbursement_account_id: string;
+  repayment_account_id: string | null;
+  category_id: string | null;
+  principal_amount: number;
+  disbursement_date: string;
+  monthly_installment: number | null;
+  status: LoanStatus;
 }
 
 export async function fetchAll(userId: string) {
-  const [accounts, categories, funds, reserves, transactions] = await Promise.all([
+  const [accounts, categories, funds, reserves, transactions, loans] = await Promise.all([
     supabase.from("accounts").select("id,code,name,role,opening_balance").order("code"),
     supabase.from("categories").select("id,name,monthly_limit").order("sort_order"),
     supabase.from("funds").select("id,code,name,account_id,monthly_target,opening_balance").order("code"),
     supabase.from("reserves").select("id,name,account_id,kind,amount,monthly_accrual").order("name"),
     supabase.from("transactions").select("*").order("date", { ascending: false }).order("created_at", { ascending: false }),
+    supabase.from("loans" as never).select("*").order("disbursement_date", { ascending: false }),
   ]);
-  const err = accounts.error ?? categories.error ?? funds.error ?? reserves.error ?? transactions.error;
+  const err = accounts.error ?? categories.error ?? funds.error ?? reserves.error ?? transactions.error ?? loans.error;
   if (err) throw err;
   return {
     accounts: (accounts.data ?? []) as AccountRow[],
@@ -48,6 +69,7 @@ export async function fetchAll(userId: string) {
     funds: (funds.data ?? []) as FundRow[],
     reserves: (reserves.data ?? []) as ReserveRow[],
     transactions: (transactions.data ?? []) as TxRow[],
+    loans: (loans.data ?? []) as unknown as LoanRow[],
   };
   // userId is unused here because RLS scopes rows; kept for future composition.
   void userId;
@@ -96,13 +118,16 @@ export function computeAccountBalances(
     switch (t.type) {
       case "income":
       case "fund_withdrawal":
+      case "loan_received":
         out[t.account_id] = (out[t.account_id] ?? 0) + amt;
         break;
       case "expense":
       case "fund_contribution":
+      case "loan_given":
         out[t.account_id] = (out[t.account_id] ?? 0) - amt;
         break;
       case "transfer":
+      case "internal_loan_repayment":
         out[t.account_id] = (out[t.account_id] ?? 0) - amt;
         if (t.destination_account_id) {
           out[t.destination_account_id] = (out[t.destination_account_id] ?? 0) + amt;
@@ -154,4 +179,7 @@ export const txTypeLabel: Record<TxType, string> = {
   fund_contribution: "Fund contribution",
   fund_withdrawal: "Fund withdrawal",
   reserve_accrual: "Reserve accrual",
+  loan_given: "Loan given",
+  loan_received: "Loan received",
+  internal_loan_repayment: "Loan repayment (self)",
 };

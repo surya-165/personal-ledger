@@ -41,7 +41,7 @@ function BudgetsPage() {
     const { categories, transactions } = q.data;
     const spentByCat: Record<string, number> = {};
     for (const t of transactions) {
-      if (t.type !== "expense") continue;
+      if (t.type !== "expense" && t.type !== "internal_loan_repayment") continue;
       if (!t.category_id) continue;
       if (!t.date.startsWith(ym)) continue;
       spentByCat[t.category_id] = (spentByCat[t.category_id] ?? 0) + Number(t.amount);
