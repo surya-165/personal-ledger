@@ -348,6 +348,79 @@ export type Database = {
           },
         ]
       }
+      loans: {
+        Row: {
+          borrower_name: string | null
+          category_id: string | null
+          created_at: string
+          disbursement_account_id: string
+          disbursement_date: string
+          id: string
+          loan_type: Database["public"]["Enums"]["loan_type"]
+          monthly_installment: number | null
+          name: string
+          principal_amount: number
+          repayment_account_id: string | null
+          status: Database["public"]["Enums"]["loan_status"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          borrower_name?: string | null
+          category_id?: string | null
+          created_at?: string
+          disbursement_account_id: string
+          disbursement_date: string
+          id?: string
+          loan_type: Database["public"]["Enums"]["loan_type"]
+          monthly_installment?: number | null
+          name: string
+          principal_amount: number
+          repayment_account_id?: string | null
+          status?: Database["public"]["Enums"]["loan_status"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          borrower_name?: string | null
+          category_id?: string | null
+          created_at?: string
+          disbursement_account_id?: string
+          disbursement_date?: string
+          id?: string
+          loan_type?: Database["public"]["Enums"]["loan_type"]
+          monthly_installment?: number | null
+          name?: string
+          principal_amount?: number
+          repayment_account_id?: string | null
+          status?: Database["public"]["Enums"]["loan_status"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "loans_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "loans_disbursement_account_id_fkey"
+            columns: ["disbursement_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "loans_repayment_account_id_fkey"
+            columns: ["repayment_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       recurring_templates: {
         Row: {
           account_id: string
@@ -490,6 +563,7 @@ export type Database = {
           destination_account_id: string | null
           fund_id: string | null
           id: string
+          loan_id: string | null
           payment_mode: string | null
           reserve_id: string | null
           type: Database["public"]["Enums"]["transaction_type"]
@@ -506,6 +580,7 @@ export type Database = {
           destination_account_id?: string | null
           fund_id?: string | null
           id?: string
+          loan_id?: string | null
           payment_mode?: string | null
           reserve_id?: string | null
           type: Database["public"]["Enums"]["transaction_type"]
@@ -522,6 +597,7 @@ export type Database = {
           destination_account_id?: string | null
           fund_id?: string | null
           id?: string
+          loan_id?: string | null
           payment_mode?: string | null
           reserve_id?: string | null
           type?: Database["public"]["Enums"]["transaction_type"]
@@ -558,6 +634,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "transactions_loan_id_fkey"
+            columns: ["loan_id"]
+            isOneToOne: false
+            referencedRelation: "loans"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "transactions_reserve_id_fkey"
             columns: ["reserve_id"]
             isOneToOne: false
@@ -574,6 +657,8 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
+      loan_status: "active" | "settled"
+      loan_type: "external" | "internal"
       reserve_kind: "floor" | "accrual"
       split_component_type:
         | "expense"
@@ -587,6 +672,9 @@ export type Database = {
         | "fund_contribution"
         | "fund_withdrawal"
         | "reserve_accrual"
+        | "loan_given"
+        | "loan_received"
+        | "internal_loan_repayment"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -714,6 +802,8 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      loan_status: ["active", "settled"],
+      loan_type: ["external", "internal"],
       reserve_kind: ["floor", "accrual"],
       split_component_type: [
         "expense",
@@ -728,6 +818,9 @@ export const Constants = {
         "fund_contribution",
         "fund_withdrawal",
         "reserve_accrual",
+        "loan_given",
+        "loan_received",
+        "internal_loan_repayment",
       ],
     },
   },
