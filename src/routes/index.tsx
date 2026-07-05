@@ -1,11 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { fetchAll, seedIfEmpty, formatINR } from "@/lib/finance-db";
 import { PageHeader } from "@/components/finance/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
 import { RecurringPanel } from "@/components/finance/recurring-panel";
 
 export const Route = createFileRoute("/")({
@@ -17,6 +19,11 @@ export const Route = createFileRoute("/")({
   }),
   component: Dashboard,
 });
+
+type Level =
+  | { name: "l1" }
+  | { name: "l2"; bucket: "regular" | "sip" | "funds" | "fixed" }
+  | { name: "l3"; categoryId: string };
 
 function Dashboard() {
   const { session, user, loading } = useAuth();
@@ -35,37 +42,44 @@ function Dashboard() {
     },
   });
 
+  const planQuery = useQuery({
+    queryKey: ["dashboard-plan", user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const [plan, investments, recurring] = await Promise.all([
+        supabase.from("budget_plan").select("*").maybeSingle(),
+        supabase.from("investments").select("id,name,goal,monthly_amount"),
+        supabase.from("recurring_templates").select("name,amount"),
+      ]);
+      const err = plan.error ?? investments.error ?? recurring.error;
+      if (err) throw err;
+      return {
+        plan: plan.data,
+        investments: investments.data ?? [],
+        recurring: Object.fromEntries((recurring.data ?? []).map((r) => [r.name, Number(r.amount)])),
+      };
+    },
+  });
+
+  const [level, setLevel] = useState<Level>({ name: "l1" });
+
   const today = new Date();
   const year = today.getFullYear();
   const month = today.getMonth() + 1;
   const monthPrefix = `${year}-${String(month).padStart(2, "0")}`;
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const dayOfMonth = today.getDate();
-  const pace = dayOfMonth / daysInMonth;
   const monthLabel = today.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 
   const data = dataQuery.data;
+  const planData = planQuery.data;
   const categories = data?.categories ?? [];
   const funds = data?.funds ?? [];
+  const investments = planData?.investments ?? [];
   const monthTx = useMemo(
     () => (data?.transactions ?? []).filter((t) => t.date.startsWith(monthPrefix)),
     [data, monthPrefix],
   );
 
-  const sumOf = (pred: (t: (typeof monthTx)[number]) => boolean) =>
-    monthTx.filter(pred).reduce((s, t) => s + Number(t.amount), 0);
-
-  const income = sumOf((t) => t.type === "income");
-  const expensesOut = sumOf((t) => t.type === "expense" || t.type === "internal_loan_repayment");
-  const reserveOut = sumOf((t) => t.type === "reserve_accrual");
-  const fundsOut = sumOf((t) => t.type === "fund_contribution");
-  // Own-account transfers net to zero across the household; show gross for context.
-  const transfersGross = sumOf((t) => t.type === "transfer");
-
-  const unallocated = income - expensesOut - reserveOut - fundsOut;
-  const variableLimit = categories.reduce((s, c) => s + Number(c.monthly_limit), 0);
-
-  // Per-category spend this month
+  // Per-category spend this month (expenses + internal_loan_repayments)
   const spentByCategory = useMemo(() => {
     const m: Record<string, number> = {};
     for (const t of monthTx) {
@@ -85,250 +99,534 @@ function Dashboard() {
     return m;
   }, [monthTx]);
 
-  if (loading || !session) return <div className="text-sm text-muted-foreground">Loading…</div>;
-  if (dataQuery.isLoading || !data) return <div className="text-sm text-muted-foreground">Loading dashboard…</div>;
+  // Split categories: Car EMI / Maintenance are Fixed Commitments; everything else is Regular.
+  const isFixedCat = (name: string) => {
+    const n = name.toLowerCase();
+    return n.includes("car emi") || n === "maintenance" || n.includes("maintenance");
+  };
+  const carEmiCat = categories.find((c) => c.name.toLowerCase().includes("car emi"));
+  const maintenanceCat = categories.find((c) => c.name.toLowerCase().includes("maintenance"));
+  const regularCategories = categories.filter((c) => !isFixedCat(c.name));
 
+  if (loading || !session) return <div className="text-sm text-muted-foreground">Loading…</div>;
+  if (dataQuery.isLoading || !data || planQuery.isLoading || !planData) {
+    return <div className="text-sm text-muted-foreground">Loading dashboard…</div>;
+  }
+
+  // Planned figures — ALL from Setup
+  const plannedIncome = Number(planData.plan?.planned_monthly_income ?? 0);
+  const plannedRegular = Number(planData.recurring["HDFC→CUB"] ?? 0);
+  const plannedSIP = investments.reduce((s, i) => s + Number(i.monthly_amount ?? 0), 0);
+  const plannedFundsTotal =
+    Number(planData.plan?.planned_corpus_contribution ?? 0) +
+    Number(planData.plan?.planned_trip_contribution ?? 0);
+  const plannedCarEmi = Number(planData.plan?.planned_car_emi ?? 0);
+  const plannedMaintenance = Number(planData.plan?.planned_maintenance ?? 0);
+  const plannedFixed = plannedCarEmi + plannedMaintenance;
+  const plannedTax = Number(planData.plan?.planned_tax_reserve ?? 0);
+
+  // Actuals this month
+  const actualRegular = regularCategories.reduce((s, c) => s + (spentByCategory[c.id] ?? 0), 0);
+  const actualFixed =
+    (carEmiCat ? spentByCategory[carEmiCat.id] ?? 0 : 0) +
+    (maintenanceCat ? spentByCategory[maintenanceCat.id] ?? 0 : 0);
+  const actualFunds = funds.reduce((s, f) => s + (contribByFund[f.id] ?? 0), 0);
+  const actualTax = monthTx
+    .filter((t) => t.type === "reserve_accrual")
+    .reduce((s, t) => s + Number(t.amount), 0);
+  // SIP actuals: match expense/transfer transactions whose description contains an investment name.
+  const actualSIPByInvestment: Record<string, number> = {};
+  for (const inv of investments) {
+    const needle = inv.name.toLowerCase();
+    actualSIPByInvestment[inv.id] = monthTx
+      .filter((t) => (t.type === "expense" || t.type === "transfer") && (t.description ?? "").toLowerCase().includes(needle))
+      .reduce((s, t) => s + Number(t.amount), 0);
+  }
+  const actualSIP = Object.values(actualSIPByInvestment).reduce((s, n) => s + n, 0);
+
+  const totalAllocated = actualRegular + actualSIP + actualFunds + actualFixed + actualTax;
+  const unallocated = plannedIncome - totalAllocated;
   const remainderMissing = Math.abs(unallocated) > 0.5;
+
+  const go = (l: Level) => setLevel(l);
 
   return (
     <div>
       <PageHeader
         title={monthLabel}
-        description={`Day ${dayOfMonth} of ${daysInMonth} · where this month's income is going.`}
+        description="This month's income and how every rupee is being allocated."
       />
 
-      <RecurringPanel />
+      {level.name === "l1" ? <RecurringPanel /> : null}
 
-      {/* Headline: monthly income */}
-      <Card className="mb-8">
-        <CardContent className="pt-6">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">
-            Income this month
-          </div>
-          <div className="mt-2 flex items-baseline gap-3">
-            <div className="text-4xl font-semibold tabular-nums tracking-tight">
-              {formatINR(income)}
+      {/* Sticky planned-income header — persists across all levels */}
+      <Card className="mb-6 sticky top-2 z-10 backdrop-blur bg-card/95">
+        <CardContent className="pt-5 pb-5 flex items-baseline justify-between gap-4">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Planned monthly income</div>
+            <div className="mt-1 text-3xl font-semibold tabular-nums tracking-tight">
+              {formatINR(plannedIncome)}
             </div>
-            <div className="text-sm text-muted-foreground">salary + net rent</div>
+            <div className="text-xs text-muted-foreground mt-0.5">from Setup · salary + net rent</div>
           </div>
-          <div className="mt-5 h-2 w-full overflow-hidden rounded-full bg-muted flex">
-            <Seg amount={expensesOut} total={income} className="bg-primary/70" />
-            <Seg amount={reserveOut} total={income} className="bg-warning/60" />
-            <Seg amount={fundsOut} total={income} className="bg-success/60" />
-            <Seg amount={Math.max(0, unallocated)} total={income} className={remainderMissing ? "bg-destructive/50" : "bg-muted-foreground/20"} />
-          </div>
-          <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-            <Legend swatch="bg-primary/70" label="Expenses" value={formatINR(expensesOut)} />
-            <Legend swatch="bg-warning/60" label="Reserves" value={formatINR(reserveOut)} />
-            <Legend swatch="bg-success/60" label="Funds" value={formatINR(fundsOut)} />
-            <Legend
-              swatch={remainderMissing ? "bg-destructive/60" : "bg-muted-foreground/20"}
-              label="Unallocated"
-              value={formatINR(unallocated)}
-            />
+          <div className="text-right">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Allocated so far</div>
+            <div className="mt-1 text-lg font-semibold tabular-nums">{formatINR(totalAllocated)}</div>
+            <div className={"text-xs tabular-nums mt-0.5 " + (remainderMissing ? "text-warning" : "text-muted-foreground")}>
+              {formatINR(Math.max(0, unallocated))} unallocated
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Budgets + Funds */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <div className="flex items-baseline justify-between">
-              <CardTitle className="text-base font-medium">Spend vs budget</CardTitle>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {formatINR(expensesOut)} / {formatINR(variableLimit)}
-              </span>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            {categories.map((c) => {
-              const spent = spentByCategory[c.id] ?? 0;
-              const limit = Number(c.monthly_limit) || 0;
-              const pct = limit > 0 ? Math.min(100, Math.round((spent / limit) * 100)) : 0;
-              const expected = limit * pace;
-              const over = spent > limit && limit > 0;
-              const ahead = !over && spent > expected * 1.05;
-              const under = spent < expected * 0.7;
-              const tag = over
-                ? { text: `Over by ${formatINR(spent - limit)}`, cls: "text-destructive" }
-                : ahead
-                  ? { text: "Ahead of pace", cls: "text-warning" }
-                  : under
-                    ? { text: "Under pace", cls: "text-success" }
-                    : { text: "On pace", cls: "text-muted-foreground" };
-              return (
-                <div key={c.id}>
-                  <div className="flex items-baseline justify-between mb-1.5">
-                    <span className="text-sm font-medium">{c.name}</span>
-                    <span className="text-xs tabular-nums text-muted-foreground">
-                      {formatINR(spent)} / {formatINR(limit)}
-                    </span>
-                  </div>
-                  <div className="relative">
-                    <Progress value={pct} />
-                    <div
-                      className="absolute top-0 h-2 w-px bg-foreground/40"
-                      style={{ left: `${Math.min(100, pace * 100)}%` }}
-                      aria-hidden
-                    />
-                  </div>
-                  <div className={"mt-1 text-xs tabular-nums " + tag.cls}>{tag.text}</div>
-                </div>
-              );
-            })}
-            {categories.length === 0 ? (
-              <div className="text-xs text-muted-foreground">No categories configured yet — add them in Setup.</div>
-            ) : null}
-            <p className="text-xs text-muted-foreground pt-2 border-t border-border">
-              Tick mark shows day-of-month pace ({Math.round(pace * 100)}%).
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-medium">Fund contributions</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            {funds.map((f) => {
-              const contributed = contribByFund[f.id] ?? 0;
-              const target = Number(f.monthly_target) || 0;
-              const pct = target > 0 ? Math.min(100, Math.round((contributed / target) * 100)) : 0;
-              const remaining = Math.max(0, target - contributed);
-              return (
-                <div key={f.id}>
-                  <div className="flex items-baseline justify-between mb-1.5">
-                    <span className="text-sm font-medium">{f.name}</span>
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                      {formatINR(contributed)} / {formatINR(target)}
-                    </span>
-                  </div>
-                  <Progress value={pct} />
-                  <div className="mt-1 text-xs tabular-nums text-muted-foreground">
-                    {remaining > 0 ? `${formatINR(remaining)} left this month` : "Target met"}
-                  </div>
-                </div>
-              );
-            })}
-            {funds.length === 0 ? (
-              <div className="text-xs text-muted-foreground">No funds configured yet.</div>
-            ) : null}
-          </CardContent>
-        </Card>
+      <div key={level.name + ("bucket" in level ? level.bucket : "") + ("categoryId" in level ? level.categoryId : "")}
+           className="animate-in fade-in slide-in-from-right-2 duration-200">
+        {level.name === "l1" ? (
+          <Level1
+            rows={[
+              { key: "regular", label: "Regular Expenses", sub: "HDFC→CUB spending allocation", actual: actualRegular, planned: plannedRegular, drill: true },
+              { key: "sip", label: "SIP Investments", sub: `${investments.length} SIP${investments.length === 1 ? "" : "s"} from HDFC`, actual: actualSIP, planned: plannedSIP, drill: investments.length > 0 },
+              { key: "funds", label: "Fund Contributions", sub: "Corpus + Trip (held inside SBI)", actual: actualFunds, planned: plannedFundsTotal, drill: true },
+              { key: "fixed", label: "Fixed Commitments", sub: "Car EMI + Maintenance", actual: actualFixed, planned: plannedFixed, drill: true },
+              { key: "tax", label: "Tax Reserve", sub: "Monthly accrual inside SBI", actual: actualTax, planned: plannedTax, drill: false },
+            ]}
+            onDrill={(key) => go({ name: "l2", bucket: key as "regular" | "sip" | "funds" | "fixed" })}
+            unallocated={unallocated}
+            remainderMissing={remainderMissing}
+          />
+        ) : level.name === "l2" && level.bucket === "regular" ? (
+          <Level2Regular
+            categories={regularCategories}
+            spentByCategory={spentByCategory}
+            plannedRegular={plannedRegular}
+            actualRegular={actualRegular}
+            onBack={() => go({ name: "l1" })}
+            onCategory={(id) => go({ name: "l3", categoryId: id })}
+          />
+        ) : level.name === "l2" && level.bucket === "sip" ? (
+          <Level2SIP
+            investments={investments}
+            actualByInvestment={actualSIPByInvestment}
+            plannedSIP={plannedSIP}
+            actualSIP={actualSIP}
+            onBack={() => go({ name: "l1" })}
+          />
+        ) : level.name === "l2" && level.bucket === "funds" ? (
+          <Level2Funds
+            funds={funds}
+            contribByFund={contribByFund}
+            planned={{ corpus: Number(planData.plan?.planned_corpus_contribution ?? 0), trip: Number(planData.plan?.planned_trip_contribution ?? 0) }}
+            onBack={() => go({ name: "l1" })}
+          />
+        ) : level.name === "l2" && level.bucket === "fixed" ? (
+          <Level2Fixed
+            carEmi={{ actual: carEmiCat ? spentByCategory[carEmiCat.id] ?? 0 : 0, planned: plannedCarEmi }}
+            maintenance={{ actual: maintenanceCat ? spentByCategory[maintenanceCat.id] ?? 0 : 0, planned: plannedMaintenance }}
+            onBack={() => go({ name: "l1" })}
+          />
+        ) : level.name === "l3" ? (
+          <Level3
+            category={categories.find((c) => c.id === level.categoryId) ?? null}
+            spent={spentByCategory[level.categoryId] ?? 0}
+            txs={monthTx.filter((t) => t.category_id === level.categoryId && (t.type === "expense" || t.type === "internal_loan_repayment"))}
+            onBack={() => go({ name: "l2", bucket: "regular" })}
+          />
+        ) : null}
       </div>
-
-      {/* Where the rest went */}
-      <Card className={remainderMissing ? "border-destructive/40" : ""}>
-        <CardHeader>
-          <div className="flex items-baseline justify-between">
-            <CardTitle className="text-base font-medium">Where it went</CardTitle>
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {formatINR(income)} usable income
-            </span>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <ul className="divide-y divide-border">
-            <WaterfallRow label="Income" sub="Salary + net rent this month" amount={income} positive />
-            <WaterfallRow
-              label="Internal transfers"
-              sub={`Between own accounts · gross ${formatINR(transfersGross)} · nets to ₹0`}
-              amount={0}
-              muted
-            />
-            <WaterfallRow
-              label="Expenses"
-              sub={`${monthTx.filter((t) => t.type === "expense").length} expense transactions across all categories`}
-              amount={-expensesOut}
-            />
-            <WaterfallRow
-              label="Reserve accruals"
-              sub="Earmarked within accounts (e.g. Tax Reserve)"
-              amount={-reserveOut}
-              muted
-            />
-            <WaterfallRow
-              label="Fund contributions"
-              sub="Corpus, Trip and other goal funds"
-              amount={-fundsOut}
-              muted
-            />
-            <WaterfallRow
-              label="Unallocated remainder"
-              sub={remainderMissing ? "Non-zero — reconcile before month end" : "Every rupee of income is accounted for"}
-              amount={unallocated}
-              bold
-              highlight={remainderMissing}
-              positive={!remainderMissing}
-            />
-          </ul>
-          <p className="mt-4 text-xs text-muted-foreground">
-            Transfers between own accounts net to zero. Fund withdrawals are excluded from this view.
-          </p>
-        </CardContent>
-      </Card>
     </div>
   );
 }
 
-function Seg({
-  amount,
-  total,
-  className,
-}: {
-  amount: number;
-  total: number;
-  className: string;
-}) {
-  const pct = total > 0 ? Math.max(0, (amount / total) * 100) : 0;
-  if (pct <= 0) return null;
-  return <div className={"h-full " + className} style={{ width: `${pct}%` }} />;
-}
+// ---------- Level 1 ----------
 
-function Legend({ swatch, label, value }: { swatch: string; label: string; value: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className={"h-2 w-2 rounded-full " + swatch} />
-      <span className="text-muted-foreground">{label}</span>
-      <span className="ml-auto tabular-nums">{value}</span>
-    </div>
-  );
-}
-
-function WaterfallRow({
-  label,
-  sub,
-  amount,
-  positive,
-  muted,
-  bold,
-  highlight,
-}: {
+interface BucketRow {
+  key: string;
   label: string;
-  sub?: string;
-  amount: number;
-  positive?: boolean;
-  muted?: boolean;
-  bold?: boolean;
-  highlight?: boolean;
+  sub: string;
+  actual: number;
+  planned: number;
+  drill: boolean;
+}
+
+function Level1({
+  rows,
+  onDrill,
+  unallocated,
+  remainderMissing,
+}: {
+  rows: BucketRow[];
+  onDrill: (key: string) => void;
+  unallocated: number;
+  remainderMissing: boolean;
 }) {
-  const tone = highlight
-    ? "text-destructive"
-    : positive
-      ? "text-success"
-      : muted
-        ? "text-muted-foreground"
-        : "text-foreground";
   return (
-    <li className={"flex items-center justify-between py-3 " + (highlight ? "-mx-6 px-6 bg-destructive/5" : "")}>
-      <div className="min-w-0">
-        <div className={"text-sm " + (bold ? "font-semibold " : "") + (highlight ? "text-destructive" : "")}>{label}</div>
-        {sub ? <div className="text-xs text-muted-foreground">{sub}</div> : null}
-      </div>
-      <span className={"tabular-nums text-sm " + (bold ? "font-semibold " : "font-medium ") + tone}>
-        {formatINR(amount)}
-      </span>
-    </li>
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base font-medium">Income waterfall</CardTitle>
+      </CardHeader>
+      <CardContent className="divide-y divide-border">
+        {rows.map((r) => (
+          <BucketBar key={r.key} row={r} onClick={r.drill ? () => onDrill(r.key) : undefined} />
+        ))}
+        <UnallocatedRow amount={unallocated} highlight={remainderMissing} />
+      </CardContent>
+    </Card>
   );
 }
+
+function BucketBar({ row, onClick }: { row: BucketRow; onClick?: () => void }) {
+  const tone = statusTone(row.actual, row.planned);
+  const pct = row.planned > 0 ? Math.min(100, (row.actual / row.planned) * 100) : 0;
+  const clickable = !!onClick;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!clickable}
+      className={
+        "w-full py-4 text-left transition-colors " +
+        (clickable ? "hover:bg-muted/40 cursor-pointer -mx-6 px-6" : "opacity-100 cursor-default -mx-6 px-6")
+      }
+    >
+      <div className="flex items-baseline justify-between gap-4 mb-1.5">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">{row.label}</div>
+          <div className="text-xs text-muted-foreground">{row.sub}</div>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="text-right">
+            <div className="text-sm tabular-nums font-medium">
+              {formatINR(row.actual)} <span className="text-muted-foreground font-normal">/ {formatINR(row.planned)}</span>
+            </div>
+            <div className={"text-xs tabular-nums " + tone.textClass}>{tone.label(row.actual, row.planned)}</div>
+          </div>
+          {clickable ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : null}
+        </div>
+      </div>
+      <ProgressBar actual={row.actual} planned={row.planned} tone={tone} />
+    </button>
+  );
+}
+
+function UnallocatedRow({ amount, highlight }: { amount: number; highlight: boolean }) {
+  return (
+    <div className={"py-4 flex items-center justify-between -mx-6 px-6 " + (highlight ? "bg-destructive/5" : "")}>
+      <div className="flex items-center gap-2">
+        {highlight ? <AlertTriangle className="h-4 w-4 text-destructive" /> : null}
+        <div>
+          <div className={"text-sm font-semibold " + (highlight ? "text-destructive" : "")}>Unallocated</div>
+          <div className="text-xs text-muted-foreground">
+            {highlight ? "Reconcile before month end" : "Every planned rupee is accounted for"}
+          </div>
+        </div>
+      </div>
+      <div className={"text-sm font-semibold tabular-nums " + (highlight ? "text-destructive" : "text-muted-foreground")}>
+        {formatINR(amount)}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Level 2 variants ----------
+
+function BackBar({ label, onBack }: { label: string; onBack: () => void }) {
+  return (
+    <div className="mb-4 flex items-center gap-2">
+      <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 h-8">
+        <ChevronLeft className="h-4 w-4 mr-1" /> Back
+      </Button>
+      <span className="text-sm text-muted-foreground">/ {label}</span>
+    </div>
+  );
+}
+
+function Level2Regular({
+  categories, spentByCategory, plannedRegular, actualRegular, onBack, onCategory,
+}: {
+  categories: { id: string; name: string; monthly_limit: number }[];
+  spentByCategory: Record<string, number>;
+  plannedRegular: number;
+  actualRegular: number;
+  onBack: () => void;
+  onCategory: (id: string) => void;
+}) {
+  return (
+    <div>
+      <BackBar label="Regular Expenses" onBack={onBack} />
+      <SummaryStrip label="Regular Expenses" actual={actualRegular} planned={plannedRegular} />
+      <Card className="mt-4">
+        <CardContent className="pt-4 divide-y divide-border">
+          {categories.length === 0 ? (
+            <div className="py-6 text-sm text-muted-foreground">No categories yet — add them in Setup.</div>
+          ) : categories.map((c) => {
+            const spent = spentByCategory[c.id] ?? 0;
+            const limit = Number(c.monthly_limit) || 0;
+            const tone = statusTone(spent, limit);
+            return (
+              <button key={c.id} onClick={() => onCategory(c.id)}
+                      className="w-full py-4 -mx-6 px-6 text-left hover:bg-muted/40 transition-colors">
+                <div className="flex items-baseline justify-between mb-1.5 gap-4">
+                  <div className="text-sm font-medium">{c.name}</div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="text-right">
+                      <div className="text-sm tabular-nums font-medium">
+                        {formatINR(spent)} <span className="text-muted-foreground font-normal">/ {formatINR(limit)}</span>
+                      </div>
+                      <div className={"text-xs tabular-nums " + tone.textClass}>{tone.label(spent, limit)}</div>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                </div>
+                <ProgressBar actual={spent} planned={limit} tone={tone} />
+              </button>
+            );
+          })}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function Level2SIP({
+  investments, actualByInvestment, plannedSIP, actualSIP, onBack,
+}: {
+  investments: Array<{ id: string; name: string; goal: string; monthly_amount: number }>;
+  actualByInvestment: Record<string, number>;
+  plannedSIP: number;
+  actualSIP: number;
+  onBack: () => void;
+}) {
+  return (
+    <div>
+      <BackBar label="SIP Investments" onBack={onBack} />
+      <SummaryStrip label="SIP Investments" actual={actualSIP} planned={plannedSIP} />
+      <Card className="mt-4">
+        <CardContent className="pt-4 divide-y divide-border">
+          {investments.length === 0 ? (
+            <div className="py-6 text-sm text-muted-foreground">No SIPs yet — add them in Setup.</div>
+          ) : investments.map((inv) => {
+            const actual = actualByInvestment[inv.id] ?? 0;
+            const planned = Number(inv.monthly_amount) || 0;
+            const tone = statusTone(actual, planned);
+            return (
+              <div key={inv.id} className="py-4">
+                <div className="flex items-baseline justify-between mb-1.5 gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{inv.name}</div>
+                    <div className="text-xs text-muted-foreground">{inv.goal || "Unassigned"}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm tabular-nums font-medium">
+                      {formatINR(actual)} <span className="text-muted-foreground font-normal">/ {formatINR(planned)}</span>
+                    </div>
+                    <div className={"text-xs tabular-nums " + tone.textClass}>{tone.label(actual, planned)}</div>
+                  </div>
+                </div>
+                <ProgressBar actual={actual} planned={planned} tone={tone} />
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function Level2Funds({
+  funds, contribByFund, planned, onBack,
+}: {
+  funds: Array<{ id: string; code: string; name: string }>;
+  contribByFund: Record<string, number>;
+  planned: { corpus: number; trip: number };
+  onBack: () => void;
+}) {
+  const totalActual = funds.reduce((s, f) => s + (contribByFund[f.id] ?? 0), 0);
+  const totalPlanned = planned.corpus + planned.trip;
+  return (
+    <div>
+      <BackBar label="Fund Contributions" onBack={onBack} />
+      <SummaryStrip label="Fund Contributions" actual={totalActual} planned={totalPlanned} />
+      <Card className="mt-4">
+        <CardContent className="pt-4 divide-y divide-border">
+          {funds.map((f) => {
+            const actual = contribByFund[f.id] ?? 0;
+            const p = f.code === "corpus" ? planned.corpus : f.code === "trip" ? planned.trip : 0;
+            const tone = statusTone(actual, p);
+            return (
+              <div key={f.id} className="py-4">
+                <div className="flex items-baseline justify-between mb-1.5 gap-4">
+                  <div className="text-sm font-medium">{f.name}</div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm tabular-nums font-medium">
+                      {formatINR(actual)} <span className="text-muted-foreground font-normal">/ {formatINR(p)}</span>
+                    </div>
+                    <div className={"text-xs tabular-nums " + tone.textClass}>{tone.label(actual, p)}</div>
+                  </div>
+                </div>
+                <ProgressBar actual={actual} planned={p} tone={tone} />
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function Level2Fixed({
+  carEmi, maintenance, onBack,
+}: {
+  carEmi: { actual: number; planned: number };
+  maintenance: { actual: number; planned: number };
+  onBack: () => void;
+}) {
+  const totalActual = carEmi.actual + maintenance.actual;
+  const totalPlanned = carEmi.planned + maintenance.planned;
+  const rows = [
+    { label: "Car EMI", ...carEmi },
+    { label: "Maintenance", ...maintenance },
+  ];
+  return (
+    <div>
+      <BackBar label="Fixed Commitments" onBack={onBack} />
+      <SummaryStrip label="Fixed Commitments" actual={totalActual} planned={totalPlanned} />
+      <Card className="mt-4">
+        <CardContent className="pt-4 divide-y divide-border">
+          {rows.map((r) => {
+            const tone = statusTone(r.actual, r.planned);
+            return (
+              <div key={r.label} className="py-4">
+                <div className="flex items-baseline justify-between mb-1.5 gap-4">
+                  <div className="text-sm font-medium">{r.label}</div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm tabular-nums font-medium">
+                      {formatINR(r.actual)} <span className="text-muted-foreground font-normal">/ {formatINR(r.planned)}</span>
+                    </div>
+                    <div className={"text-xs tabular-nums " + tone.textClass}>{tone.label(r.actual, r.planned)}</div>
+                  </div>
+                </div>
+                <ProgressBar actual={r.actual} planned={r.planned} tone={tone} />
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ---------- Level 3 ----------
+
+function Level3({
+  category, spent, txs, onBack,
+}: {
+  category: { id: string; name: string; monthly_limit: number } | null;
+  spent: number;
+  txs: Array<{ id: string; date: string; description: string; amount: number; payment_mode: string | null; type: string }>;
+  onBack: () => void;
+}) {
+  const limit = Number(category?.monthly_limit ?? 0);
+  const sorted = [...txs].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  return (
+    <div>
+      <BackBar label={category?.name ?? "Category"} onBack={onBack} />
+      <SummaryStrip label={category?.name ?? "Category"} actual={spent} planned={limit} />
+      <Card className="mt-4">
+        <CardContent className="pt-4">
+          {sorted.length === 0 ? (
+            <div className="py-6 text-sm text-muted-foreground">No transactions in this category this month.</div>
+          ) : (
+            <ul className="divide-y divide-border">
+              {sorted.map((t) => (
+                <li key={t.id} className="py-3 flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">{t.description || (t.type === "internal_loan_repayment" ? "Loan repayment" : "Expense")}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {formatDate(t.date)}{t.payment_mode ? ` · ${t.payment_mode}` : ""}
+                    </div>
+                  </div>
+                  <div className="text-sm tabular-nums font-medium shrink-0">{formatINR(Number(t.amount))}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ---------- shared bits ----------
+
+function SummaryStrip({ label, actual, planned }: { label: string; actual: number; planned: number }) {
+  const tone = statusTone(actual, planned);
+  return (
+    <Card>
+      <CardContent className="pt-5 pb-5">
+        <div className="flex items-baseline justify-between gap-4 mb-3">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+            <div className="mt-1 text-2xl font-semibold tabular-nums">
+              {formatINR(actual)} <span className="text-base font-normal text-muted-foreground">/ {formatINR(planned)}</span>
+            </div>
+          </div>
+          <div className={"text-sm tabular-nums " + tone.textClass}>{tone.label(actual, planned)}</div>
+        </div>
+        <ProgressBar actual={actual} planned={planned} tone={tone} />
+      </CardContent>
+    </Card>
+  );
+}
+
+type Tone = { textClass: string; barClass: string; trackClass: string; label: (a: number, p: number) => string };
+
+function statusTone(actual: number, planned: number): Tone {
+  if (planned <= 0) {
+    return {
+      textClass: "text-muted-foreground",
+      barClass: "bg-muted-foreground/40",
+      trackClass: "bg-muted",
+      label: () => "No target set",
+    };
+  }
+  const ratio = actual / planned;
+  if (actual > planned) {
+    return {
+      textClass: "text-destructive",
+      barClass: "bg-destructive",
+      trackClass: "bg-destructive/15",
+      label: (a, p) => `Over by ${formatINR(a - p)}`,
+    };
+  }
+  if (ratio >= 0.9) {
+    return {
+      textClass: "text-warning",
+      barClass: "bg-warning",
+      trackClass: "bg-warning/15",
+      label: (a, p) => `${formatINR(p - a)} left`,
+    };
+  }
+  return {
+    textClass: "text-muted-foreground",
+    barClass: "bg-primary",
+    trackClass: "bg-primary/15",
+    label: (a, p) => `${formatINR(p - a)} left`,
+  };
+}
+
+function ProgressBar({ actual, planned, tone }: { actual: number; planned: number; tone: Tone }) {
+  const pct = planned > 0 ? Math.min(100, Math.max(0, (actual / planned) * 100)) : 0;
+  return (
+    <div className={"h-2 w-full overflow-hidden rounded-full " + tone.trackClass}>
+      <div className={"h-full transition-all " + tone.barClass} style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+}
+
+// legacy exports kept for tree shake — none needed.
+export {};
