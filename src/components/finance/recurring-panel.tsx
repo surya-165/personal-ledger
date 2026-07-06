@@ -157,7 +157,6 @@ function ConfirmDialog({
   const corpus = ctx.funds.find((f) => f.code === "corpus");
   const trip = ctx.funds.find((f) => f.code === "trip");
   const taxReserve = findByName(ctx.reserves, "tax");
-  const maintCat = findByName(ctx.categories, "maintenance");
   const emiCat = findByName(ctx.categories, "car emi") ?? findByName(ctx.categories, "emi");
 
   const defaults: Record<TplId, number> = {
@@ -171,14 +170,12 @@ function ConfirmDialog({
   const [busy, setBusy] = useState(false);
 
   // rent-split overrides
-  const [maintAmt, setMaintAmt] = useState<string>(String(ctx.plan?.planned_maintenance ?? 0));
   const [emiAmt, setEmiAmt] = useState<string>(String(ctx.plan?.planned_car_emi ?? 0));
   const [taxAmt, setTaxAmt] = useState<string>(String(ctx.plan?.planned_tax_reserve ?? taxReserve?.monthly_accrual ?? 0));
   const [corpusAmt, setCorpusAmt] = useState<string>(String(ctx.plan?.planned_corpus_contribution ?? corpus?.monthly_target ?? 0));
   const [tripAmt, setTripAmt] = useState<string>(String(ctx.plan?.planned_trip_contribution ?? trip?.monthly_target ?? 0));
 
   const amt = Number(amount) || 0;
-  const m = Number(maintAmt) || 0;
   const e = Number(emiAmt) || 0;
   const t = Number(taxAmt) || 0;
   const c = Number(corpusAmt) || 0;
@@ -207,47 +204,42 @@ function ConfirmDialog({
     out.push({
       type: "income", amount: amt, account_id: sbi.id,
       description: `Rent ${TAG("rent")}`,
-      label: "Rent income → SBI",
-    });
-    if (m > 0 && maintCat) out.push({
-      type: "expense", amount: m, account_id: sbi.id, category_id: maintCat.id,
-      description: `Apartment maintenance ${TAG("rent")}`,
-      label: `Maintenance expense (${maintCat.name}) → SBI`,
+      label: "Rental income credited",
     });
     if (t > 0 && taxReserve) out.push({
       type: "reserve_accrual", amount: t, account_id: taxReserve.account_id, reserve_id: taxReserve.id,
       description: `Tax reserve accrual ${TAG("rent")}`,
-      label: `Tax reserve accrual (earmark ${formatINR(t)})`,
+      label: "Tax reserve earmark",
     });
     if (e > 0 && emiCat) out.push({
       type: "expense", amount: e, account_id: sbi.id, category_id: emiCat.id,
       description: `Car EMI ${TAG("rent")}`,
-      label: `Car EMI expense (${emiCat.name}) → SBI`,
+      label: "Car EMI",
     });
     // Residual cash in SBI available for funds (tax reserve is earmarked)
-    const residual = amt - m - t - e;
+    const residual = amt - t - e;
     const fundTotal = c + tr;
     const topUp = Math.max(0, fundTotal - residual);
     if (topUp > 0) out.push({
       type: "transfer", amount: topUp, account_id: hdfc.id, destination_account_id: sbi.id,
       description: `HDFC → SBI top-up for fund contributions ${TAG("rent")}`,
-      label: `Auto HDFC → SBI top-up ${formatINR(topUp)}`,
+      label: "HDFC → SBI top-up transfer",
     });
     if (c > 0 && corpus) out.push({
       type: "fund_contribution", amount: c, account_id: sbi.id, fund_id: corpus.id,
       description: `Corpus fund contribution ${TAG("rent")}`,
-      label: "Corpus fund contribution ← SBI",
+      label: "Corpus Fund contribution",
     });
     if (tr > 0 && trip) out.push({
       type: "fund_contribution", amount: tr, account_id: sbi.id, fund_id: trip.id,
       description: `Trip fund contribution ${TAG("rent")}`,
-      label: "Trip fund contribution ← SBI",
+      label: "Trip Fund contribution",
     });
     return out;
-  }, [templateId, amt, m, e, t, c, tr, hdfc, cub, sbi, corpus, trip, maintCat, emiCat, taxReserve]);
+  }, [templateId, amt, e, t, c, tr, hdfc, cub, sbi, corpus, trip, emiCat, taxReserve]);
 
   const isRent = templateId === "rent";
-  const residual = amt - m - t - e;
+  const residual = amt - t - e;
   const fundTotal = c + tr;
   const topUp = Math.max(0, fundTotal - residual);
 
@@ -297,7 +289,9 @@ function ConfirmDialog({
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Amount (₹)</label>
+            <label className="text-xs text-muted-foreground mb-1.5 block">
+              {isRent ? "Rental income (₹)" : "Amount (₹)"}
+            </label>
             <Input type="number" min="0" step="0.01" value={amount} onChange={(ev) => setAmount(ev.target.value)} />
           </div>
           <div>
@@ -308,9 +302,8 @@ function ConfirmDialog({
 
         {isRent ? (
           <div className="mt-2 space-y-2">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Split amounts</div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">SBI monthly outflows</div>
             <div className="grid grid-cols-2 gap-3">
-              <SmallField label="Maintenance" v={maintAmt} setV={setMaintAmt} />
               <SmallField label="Car EMI" v={emiAmt} setV={setEmiAmt} />
               <SmallField label="Tax reserve accrual" v={taxAmt} setV={setTaxAmt} />
               <SmallField label="Corpus fund" v={corpusAmt} setV={setCorpusAmt} />
@@ -326,7 +319,6 @@ function ConfirmDialog({
             </WaterfallStep>
 
             <WaterfallStep n={2} title="Deductions from SBI">
-              <WaterfallLine label="Maintenance expense" amount={m} sign="-" />
               <WaterfallLine label="Tax reserve earmark" amount={t} sign="-" />
               <WaterfallLine label="Car EMI" amount={e} sign="-" />
               <WaterfallFooter label="SBI residual after deductions" amount={residual} />
@@ -348,29 +340,7 @@ function ConfirmDialog({
               <WaterfallFooter label="HDFC → SBI top-up required" amount={topUp} />
             </WaterfallStep>
 
-            <Collapsible>
-              <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/40">
-                <span className="text-muted-foreground">
-                  {rows.length} transaction{rows.length === 1 ? "" : "s"} will be logged
-                </span>
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <ul className="mt-2 divide-y divide-border rounded-md border border-border">
-                  {rows.map((r, i) => (
-                    <li key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                      <span className="min-w-0 truncate">{r.label}</span>
-                      <span className="tabular-nums text-muted-foreground">{formatINR(r.amount)}</span>
-                    </li>
-                  ))}
-                  {rows.length === 0 ? (
-                    <li className="px-3 py-3 text-xs text-muted-foreground">
-                      Missing configuration — check that accounts, funds, tax reserve and Maintenance/Car EMI categories exist in Setup.
-                    </li>
-                  ) : null}
-                </ul>
-              </CollapsibleContent>
-            </Collapsible>
+            <GroupedTxList rows={rows} sbiId={sbi?.id} hdfcId={hdfc?.id} />
           </div>
         ) : (
           <div className="mt-3">
@@ -452,5 +422,62 @@ function FundLine({ label, target, fromResidual, fromTopUp }: { label: string; t
         {formatINR(fromResidual)} from SBI residual · {formatINR(fromTopUp)} from HDFC top-up
       </div>
     </div>
+  );
+}
+
+function GroupedTxList({ rows, sbiId, hdfcId }: { rows: PreviewRow[]; sbiId?: string; hdfcId?: string }) {
+  type Entry = { label: string; amount: number; sign: "+" | "-" };
+  const sbi: Entry[] = [];
+  const hdfc: Entry[] = [];
+  for (const r of rows) {
+    if (r.type === "transfer") {
+      // source debits, destination credits
+      if (r.account_id === hdfcId) hdfc.push({ label: r.label, amount: r.amount, sign: "-" });
+      if (r.destination_account_id === sbiId) sbi.push({ label: "HDFC top-up received", amount: r.amount, sign: "+" });
+      continue;
+    }
+    const credit = r.type === "income" || r.type === "reserve_accrual";
+    const entry: Entry = { label: r.label, amount: r.amount, sign: credit ? "+" : "-" };
+    if (r.account_id === sbiId) sbi.push(entry);
+    else if (r.account_id === hdfcId) hdfc.push(entry);
+  }
+  const groups = [
+    { name: "SBI", entries: sbi },
+    { name: "HDFC", entries: hdfc },
+  ].filter((g) => g.entries.length > 0);
+  const total = rows.length;
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/40">
+        <span className="text-muted-foreground">
+          {total} transaction{total === 1 ? "" : "s"} across {groups.length} account{groups.length === 1 ? "" : "s"}
+        </span>
+        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-2 space-y-3">
+          {groups.map((g) => (
+            <div key={g.name} className="rounded-md border border-border">
+              <div className="border-b border-border px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {g.name}
+              </div>
+              <ul className="divide-y divide-border">
+                {g.entries.map((e, i) => (
+                  <li key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                    <span className="min-w-0 truncate">{e.label}</span>
+                    <span className="tabular-nums text-muted-foreground">{e.sign}{formatINR(e.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          {total === 0 ? (
+            <div className="rounded-md border border-border px-3 py-3 text-xs text-muted-foreground">
+              Missing configuration — check that accounts, funds, tax reserve and Car EMI category exist in Setup.
+            </div>
+          ) : null}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
