@@ -289,7 +289,9 @@ function ConfirmDialog({
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs text-muted-foreground mb-1.5 block">Amount (₹)</label>
+            <label className="text-xs text-muted-foreground mb-1.5 block">
+              {isRent ? "Rental income (₹)" : "Amount (₹)"}
+            </label>
             <Input type="number" min="0" step="0.01" value={amount} onChange={(ev) => setAmount(ev.target.value)} />
           </div>
           <div>
@@ -300,9 +302,8 @@ function ConfirmDialog({
 
         {isRent ? (
           <div className="mt-2 space-y-2">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Split amounts</div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">SBI monthly outflows</div>
             <div className="grid grid-cols-2 gap-3">
-              <SmallField label="Maintenance" v={maintAmt} setV={setMaintAmt} />
               <SmallField label="Car EMI" v={emiAmt} setV={setEmiAmt} />
               <SmallField label="Tax reserve accrual" v={taxAmt} setV={setTaxAmt} />
               <SmallField label="Corpus fund" v={corpusAmt} setV={setCorpusAmt} />
@@ -318,7 +319,6 @@ function ConfirmDialog({
             </WaterfallStep>
 
             <WaterfallStep n={2} title="Deductions from SBI">
-              <WaterfallLine label="Maintenance expense" amount={m} sign="-" />
               <WaterfallLine label="Tax reserve earmark" amount={t} sign="-" />
               <WaterfallLine label="Car EMI" amount={e} sign="-" />
               <WaterfallFooter label="SBI residual after deductions" amount={residual} />
@@ -340,29 +340,7 @@ function ConfirmDialog({
               <WaterfallFooter label="HDFC → SBI top-up required" amount={topUp} />
             </WaterfallStep>
 
-            <Collapsible>
-              <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/40">
-                <span className="text-muted-foreground">
-                  {rows.length} transaction{rows.length === 1 ? "" : "s"} will be logged
-                </span>
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <ul className="mt-2 divide-y divide-border rounded-md border border-border">
-                  {rows.map((r, i) => (
-                    <li key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                      <span className="min-w-0 truncate">{r.label}</span>
-                      <span className="tabular-nums text-muted-foreground">{formatINR(r.amount)}</span>
-                    </li>
-                  ))}
-                  {rows.length === 0 ? (
-                    <li className="px-3 py-3 text-xs text-muted-foreground">
-                      Missing configuration — check that accounts, funds, tax reserve and Maintenance/Car EMI categories exist in Setup.
-                    </li>
-                  ) : null}
-                </ul>
-              </CollapsibleContent>
-            </Collapsible>
+            <GroupedTxList rows={rows} sbiId={sbi?.id} hdfcId={hdfc?.id} />
           </div>
         ) : (
           <div className="mt-3">
