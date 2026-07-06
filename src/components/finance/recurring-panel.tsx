@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
-type TplId = "salary" | "rent" | "hdfc_cub" | "hdfc_sbi";
+type TplId = "salary" | "rent" | "hdfc_cub";
 
 interface Ctx {
   accounts: AccountRow[];
@@ -68,7 +68,7 @@ export function RecurringPanel() {
     for (const t of ctx.transactions) {
       if (!t.date.startsWith(key)) continue;
       const d = t.description || "";
-      (["salary", "rent", "hdfc_cub", "hdfc_sbi"] as TplId[]).forEach((id) => {
+      (["salary", "rent", "hdfc_cub"] as TplId[]).forEach((id) => {
         if (d.includes(TAG(id))) set.add(id);
       });
     }
@@ -79,9 +79,8 @@ export function RecurringPanel() {
 
   const templates: Array<{ id: TplId; title: string; subtitle: string; defaultAmount: number }> = [
     { id: "salary", title: "Salary credit", subtitle: "→ HDFC", defaultAmount: ctx.recurring["Salary"]?.amount ?? 0 },
-    { id: "rent", title: "Rent credit + split", subtitle: "→ SBI · auto-splits maintenance, tax reserve, EMI, funds", defaultAmount: ctx.recurring["Rent"]?.amount ?? 0 },
+    { id: "rent", title: "Monthly rent & SBI allocation", subtitle: "Rent → SBI · auto-splits maintenance, tax reserve, EMI, fund contributions & HDFC top-up", defaultAmount: ctx.recurring["Rent"]?.amount ?? 0 },
     { id: "hdfc_cub", title: "HDFC → CUB transfer", subtitle: "monthly spending allowance", defaultAmount: ctx.recurring["HDFC→CUB"]?.amount ?? 0 },
-    { id: "hdfc_sbi", title: "HDFC → SBI transfer", subtitle: "manual top-up", defaultAmount: 0 },
   ];
 
   return (
