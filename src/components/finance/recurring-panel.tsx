@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Check } from "lucide-react";
+import { CalendarClock, Check, ChevronDown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { fetchAll, formatINR, type TxType, type AccountRow, type CategoryRow, type FundRow, type ReserveRow, type TxRow } from "@/lib/finance-db";
@@ -9,9 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
 
-type TplId = "salary" | "rent" | "hdfc_cub" | "hdfc_sbi";
+type TplId = "salary" | "rent" | "hdfc_cub";
 
 interface Ctx {
   accounts: AccountRow[];
@@ -68,7 +69,7 @@ export function RecurringPanel() {
     for (const t of ctx.transactions) {
       if (!t.date.startsWith(key)) continue;
       const d = t.description || "";
-      (["salary", "rent", "hdfc_cub", "hdfc_sbi"] as TplId[]).forEach((id) => {
+      (["salary", "rent", "hdfc_cub"] as TplId[]).forEach((id) => {
         if (d.includes(TAG(id))) set.add(id);
       });
     }
@@ -79,9 +80,8 @@ export function RecurringPanel() {
 
   const templates: Array<{ id: TplId; title: string; subtitle: string; defaultAmount: number }> = [
     { id: "salary", title: "Salary credit", subtitle: "→ HDFC", defaultAmount: ctx.recurring["Salary"]?.amount ?? 0 },
-    { id: "rent", title: "Rent credit + split", subtitle: "→ SBI · auto-splits maintenance, tax reserve, EMI, funds", defaultAmount: ctx.recurring["Rent"]?.amount ?? 0 },
+    { id: "rent", title: "Monthly rent & SBI allocation", subtitle: "Rent → SBI · auto-splits maintenance, tax reserve, EMI, fund contributions & HDFC top-up", defaultAmount: ctx.recurring["Rent"]?.amount ?? 0 },
     { id: "hdfc_cub", title: "HDFC → CUB transfer", subtitle: "monthly spending allowance", defaultAmount: ctx.recurring["HDFC→CUB"]?.amount ?? 0 },
-    { id: "hdfc_sbi", title: "HDFC → SBI transfer", subtitle: "manual top-up", defaultAmount: 0 },
   ];
 
   return (
@@ -164,7 +164,6 @@ function ConfirmDialog({
     salary: ctx.recurring["Salary"]?.amount ?? 0,
     rent: ctx.recurring["Rent"]?.amount ?? 0,
     hdfc_cub: ctx.recurring["HDFC→CUB"]?.amount ?? 0,
-    hdfc_sbi: 0,
   };
 
   const [amount, setAmount] = useState<string>(String(defaults[templateId] || ""));
@@ -200,14 +199,6 @@ function ConfirmDialog({
         type: "transfer", amount: amt, account_id: hdfc.id, destination_account_id: cub.id,
         description: `HDFC → CUB ${TAG("hdfc_cub")}`,
         label: "Transfer HDFC → CUB",
-      }];
-    }
-    if (templateId === "hdfc_sbi") {
-      if (!hdfc || !sbi) return [];
-      return [{
-        type: "transfer", amount: amt, account_id: hdfc.id, destination_account_id: sbi.id,
-        description: `HDFC → SBI ${TAG("hdfc_sbi")}`,
-        label: "Transfer HDFC → SBI",
       }];
     }
     // rent + split
@@ -286,10 +277,16 @@ function ConfirmDialog({
 
   const titleMap: Record<TplId, string> = {
     salary: "Confirm salary credit",
-    rent: "Confirm rent credit + monthly split",
+    rent: "Monthly rent & SBI allocation",
     hdfc_cub: "Confirm HDFC → CUB transfer",
-    hdfc_sbi: "Confirm HDFC → SBI transfer",
   };
+
+  // Rent waterfall computations
+  const corpusFromResidual = Math.max(0, Math.min(c, Math.max(0, residual)));
+  const corpusFromTopUp = c - corpusFromResidual;
+  const residualAfterCorpus = Math.max(0, residual - corpusFromResidual);
+  const tripFromResidual = Math.max(0, Math.min(tr, residualAfterCorpus));
+  const tripFromTopUp = tr - tripFromResidual;
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -319,30 +316,80 @@ function ConfirmDialog({
               <SmallField label="Corpus fund" v={corpusAmt} setV={setCorpusAmt} />
               <SmallField label="Trip fund" v={tripAmt} setV={setTripAmt} />
             </div>
-            <div className="text-xs text-muted-foreground pt-1">
-              SBI residual after maintenance, tax earmark & EMI: <span className="tabular-nums text-foreground">{formatINR(residual)}</span> ·
-              Fund contributions need <span className="tabular-nums text-foreground">{formatINR(fundTotal)}</span>
-              {topUp > 0 ? <> · auto top-up <span className="tabular-nums text-foreground">{formatINR(topUp)}</span></> : null}
-            </div>
           </div>
         ) : null}
 
-        <div className="mt-3">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Preview — {rows.length} row{rows.length === 1 ? "" : "s"}</div>
-          <ul className="divide-y divide-border rounded-md border border-border">
-            {rows.map((r, i) => (
-              <li key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                <span className="min-w-0 truncate">{r.label}</span>
-                <span className="tabular-nums text-muted-foreground">{formatINR(r.amount)}</span>
-              </li>
-            ))}
-            {rows.length === 0 ? (
-              <li className="px-3 py-3 text-xs text-muted-foreground">
-                Missing configuration — check that accounts, funds, tax reserve and Maintenance/Car EMI categories exist in Setup.
-              </li>
-            ) : null}
-          </ul>
-        </div>
+        {isRent ? (
+          <div className="mt-3 space-y-3">
+            <WaterfallStep n={1} title="Rent received">
+              <WaterfallLine label="Credited to SBI" amount={amt} sign="+" />
+            </WaterfallStep>
+
+            <WaterfallStep n={2} title="Deductions from SBI">
+              <WaterfallLine label="Maintenance expense" amount={m} sign="-" />
+              <WaterfallLine label="Tax reserve earmark" amount={t} sign="-" />
+              <WaterfallLine label="Car EMI" amount={e} sign="-" />
+              <WaterfallFooter label="SBI residual after deductions" amount={residual} />
+            </WaterfallStep>
+
+            <WaterfallStep n={3} title="Fund contributions">
+              <FundLine
+                label="Corpus Fund target"
+                target={c}
+                fromResidual={corpusFromResidual}
+                fromTopUp={corpusFromTopUp}
+              />
+              <FundLine
+                label="Trip Fund target"
+                target={tr}
+                fromResidual={tripFromResidual}
+                fromTopUp={tripFromTopUp}
+              />
+              <WaterfallFooter label="HDFC → SBI top-up required" amount={topUp} />
+            </WaterfallStep>
+
+            <Collapsible>
+              <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/40">
+                <span className="text-muted-foreground">
+                  {rows.length} transaction{rows.length === 1 ? "" : "s"} will be logged
+                </span>
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <ul className="mt-2 divide-y divide-border rounded-md border border-border">
+                  {rows.map((r, i) => (
+                    <li key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                      <span className="min-w-0 truncate">{r.label}</span>
+                      <span className="tabular-nums text-muted-foreground">{formatINR(r.amount)}</span>
+                    </li>
+                  ))}
+                  {rows.length === 0 ? (
+                    <li className="px-3 py-3 text-xs text-muted-foreground">
+                      Missing configuration — check that accounts, funds, tax reserve and Maintenance/Car EMI categories exist in Setup.
+                    </li>
+                  ) : null}
+                </ul>
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
+        ) : (
+          <div className="mt-3">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Preview — {rows.length} row{rows.length === 1 ? "" : "s"}</div>
+            <ul className="divide-y divide-border rounded-md border border-border">
+              {rows.map((r, i) => (
+                <li key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                  <span className="min-w-0 truncate">{r.label}</span>
+                  <span className="tabular-nums text-muted-foreground">{formatINR(r.amount)}</span>
+                </li>
+              ))}
+              {rows.length === 0 ? (
+                <li className="px-3 py-3 text-xs text-muted-foreground">
+                  Missing configuration.
+                </li>
+              ) : null}
+            </ul>
+          </div>
+        )}
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
@@ -360,6 +407,50 @@ function SmallField({ label, v, setV }: { label: string; v: string; setV: (s: st
     <div>
       <label className="text-xs text-muted-foreground mb-1 block">{label}</label>
       <Input type="number" min="0" step="0.01" value={v} onChange={(e) => setV(e.target.value)} />
+    </div>
+  );
+}
+
+function WaterfallStep({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-md border border-border">
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-xs font-medium tabular-nums text-muted-foreground">{n}</span>
+        <span className="text-sm font-medium">{title}</span>
+      </div>
+      <div className="px-3 py-2 space-y-1.5">{children}</div>
+    </div>
+  );
+}
+
+function WaterfallLine({ label, amount, sign }: { label: string; amount: number; sign: "+" | "-" }) {
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="tabular-nums">{sign}{formatINR(amount)}</span>
+    </div>
+  );
+}
+
+function WaterfallFooter({ label, amount }: { label: string; amount: number }) {
+  return (
+    <div className="mt-2 flex items-center justify-between border-t border-border pt-2 text-sm font-medium">
+      <span>{label}</span>
+      <span className="tabular-nums">{formatINR(amount)}</span>
+    </div>
+  );
+}
+
+function FundLine({ label, target, fromResidual, fromTopUp }: { label: string; target: number; fromResidual: number; fromTopUp: number }) {
+  return (
+    <div className="text-sm">
+      <div className="flex items-center justify-between">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="tabular-nums">{formatINR(target)}</span>
+      </div>
+      <div className="pl-3 text-xs text-muted-foreground">
+        {formatINR(fromResidual)} from SBI residual · {formatINR(fromTopUp)} from HDFC top-up
+      </div>
     </div>
   );
 }
