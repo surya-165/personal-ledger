@@ -157,7 +157,6 @@ function ConfirmDialog({
   const corpus = ctx.funds.find((f) => f.code === "corpus");
   const trip = ctx.funds.find((f) => f.code === "trip");
   const taxReserve = findByName(ctx.reserves, "tax");
-  const maintCat = findByName(ctx.categories, "maintenance");
   const emiCat = findByName(ctx.categories, "car emi") ?? findByName(ctx.categories, "emi");
 
   const defaults: Record<TplId, number> = {
@@ -171,14 +170,12 @@ function ConfirmDialog({
   const [busy, setBusy] = useState(false);
 
   // rent-split overrides
-  const [maintAmt, setMaintAmt] = useState<string>(String(ctx.plan?.planned_maintenance ?? 0));
   const [emiAmt, setEmiAmt] = useState<string>(String(ctx.plan?.planned_car_emi ?? 0));
   const [taxAmt, setTaxAmt] = useState<string>(String(ctx.plan?.planned_tax_reserve ?? taxReserve?.monthly_accrual ?? 0));
   const [corpusAmt, setCorpusAmt] = useState<string>(String(ctx.plan?.planned_corpus_contribution ?? corpus?.monthly_target ?? 0));
   const [tripAmt, setTripAmt] = useState<string>(String(ctx.plan?.planned_trip_contribution ?? trip?.monthly_target ?? 0));
 
   const amt = Number(amount) || 0;
-  const m = Number(maintAmt) || 0;
   const e = Number(emiAmt) || 0;
   const t = Number(taxAmt) || 0;
   const c = Number(corpusAmt) || 0;
@@ -207,47 +204,42 @@ function ConfirmDialog({
     out.push({
       type: "income", amount: amt, account_id: sbi.id,
       description: `Rent ${TAG("rent")}`,
-      label: "Rent income → SBI",
-    });
-    if (m > 0 && maintCat) out.push({
-      type: "expense", amount: m, account_id: sbi.id, category_id: maintCat.id,
-      description: `Apartment maintenance ${TAG("rent")}`,
-      label: `Maintenance expense (${maintCat.name}) → SBI`,
+      label: "Rental income credited",
     });
     if (t > 0 && taxReserve) out.push({
       type: "reserve_accrual", amount: t, account_id: taxReserve.account_id, reserve_id: taxReserve.id,
       description: `Tax reserve accrual ${TAG("rent")}`,
-      label: `Tax reserve accrual (earmark ${formatINR(t)})`,
+      label: "Tax reserve earmark",
     });
     if (e > 0 && emiCat) out.push({
       type: "expense", amount: e, account_id: sbi.id, category_id: emiCat.id,
       description: `Car EMI ${TAG("rent")}`,
-      label: `Car EMI expense (${emiCat.name}) → SBI`,
+      label: "Car EMI",
     });
     // Residual cash in SBI available for funds (tax reserve is earmarked)
-    const residual = amt - m - t - e;
+    const residual = amt - t - e;
     const fundTotal = c + tr;
     const topUp = Math.max(0, fundTotal - residual);
     if (topUp > 0) out.push({
       type: "transfer", amount: topUp, account_id: hdfc.id, destination_account_id: sbi.id,
       description: `HDFC → SBI top-up for fund contributions ${TAG("rent")}`,
-      label: `Auto HDFC → SBI top-up ${formatINR(topUp)}`,
+      label: "HDFC → SBI top-up transfer",
     });
     if (c > 0 && corpus) out.push({
       type: "fund_contribution", amount: c, account_id: sbi.id, fund_id: corpus.id,
       description: `Corpus fund contribution ${TAG("rent")}`,
-      label: "Corpus fund contribution ← SBI",
+      label: "Corpus Fund contribution",
     });
     if (tr > 0 && trip) out.push({
       type: "fund_contribution", amount: tr, account_id: sbi.id, fund_id: trip.id,
       description: `Trip fund contribution ${TAG("rent")}`,
-      label: "Trip fund contribution ← SBI",
+      label: "Trip Fund contribution",
     });
     return out;
-  }, [templateId, amt, m, e, t, c, tr, hdfc, cub, sbi, corpus, trip, maintCat, emiCat, taxReserve]);
+  }, [templateId, amt, e, t, c, tr, hdfc, cub, sbi, corpus, trip, emiCat, taxReserve]);
 
   const isRent = templateId === "rent";
-  const residual = amt - m - t - e;
+  const residual = amt - t - e;
   const fundTotal = c + tr;
   const topUp = Math.max(0, fundTotal - residual);
 
