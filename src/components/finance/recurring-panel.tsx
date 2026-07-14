@@ -30,8 +30,22 @@ interface Ctx {
   recurring: Record<string, { amount: number }>;
 }
 
-const TAG = (id: TplId) => `[Recurring:${id}]`;
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+
+// Clean human-readable descriptions written by each template. Also used to
+// detect whether the template has already run this month.
+const RECURRING_DESCRIPTIONS: Record<TplId, string[]> = {
+  salary: ["Salary credited"],
+  hdfc_cub: ["Monthly transfer to CUB for regular expenses"],
+  rent: [
+    "Rental income credited",
+    "Tax reserve set aside",
+    "Car EMI",
+    "Monthly top-up to SBI for fund contributions",
+    "Corpus Fund contribution",
+    "Trip Fund contribution",
+  ],
+};
 
 function findByName<T extends { name: string }>(list: T[], needle: string): T | undefined {
   const n = needle.toLowerCase();
@@ -70,7 +84,7 @@ export function RecurringPanel() {
       if (!t.date.startsWith(key)) continue;
       const d = t.description || "";
       (["salary", "rent", "hdfc_cub"] as TplId[]).forEach((id) => {
-        if (d.includes(TAG(id))) set.add(id);
+        if (RECURRING_DESCRIPTIONS[id].includes(d)) set.add(id);
       });
     }
     return set;
@@ -186,7 +200,7 @@ function ConfirmDialog({
       if (!hdfc) return [];
       return [{
         type: "income", amount: amt, account_id: hdfc.id,
-        description: `Salary ${TAG("salary")}`,
+        description: "Salary credited",
         label: "Salary → HDFC",
       }];
     }
@@ -194,7 +208,7 @@ function ConfirmDialog({
       if (!hdfc || !cub) return [];
       return [{
         type: "transfer", amount: amt, account_id: hdfc.id, destination_account_id: cub.id,
-        description: `HDFC → CUB ${TAG("hdfc_cub")}`,
+        description: "Monthly transfer to CUB for regular expenses",
         label: "Transfer HDFC → CUB",
       }];
     }
@@ -203,17 +217,17 @@ function ConfirmDialog({
     const out: PreviewRow[] = [];
     out.push({
       type: "income", amount: amt, account_id: sbi.id,
-      description: `Rent ${TAG("rent")}`,
+      description: "Rental income credited",
       label: "Rental income credited",
     });
     if (t > 0 && taxReserve) out.push({
       type: "reserve_accrual", amount: t, account_id: taxReserve.account_id, reserve_id: taxReserve.id,
-      description: `Tax reserve accrual ${TAG("rent")}`,
+      description: "Tax reserve set aside",
       label: "Tax reserve earmark",
     });
     if (e > 0 && emiCat) out.push({
       type: "expense", amount: e, account_id: sbi.id, category_id: emiCat.id,
-      description: `Car EMI ${TAG("rent")}`,
+      description: "Car EMI",
       label: "Car EMI",
     });
     // Residual cash in SBI available for funds (tax reserve is earmarked)
@@ -222,17 +236,17 @@ function ConfirmDialog({
     const topUp = Math.max(0, fundTotal - residual);
     if (topUp > 0) out.push({
       type: "transfer", amount: topUp, account_id: hdfc.id, destination_account_id: sbi.id,
-      description: `HDFC → SBI top-up for fund contributions ${TAG("rent")}`,
+      description: "Monthly top-up to SBI for fund contributions",
       label: "HDFC → SBI top-up transfer",
     });
     if (c > 0 && corpus) out.push({
       type: "fund_contribution", amount: c, account_id: sbi.id, fund_id: corpus.id,
-      description: `Corpus fund contribution ${TAG("rent")}`,
+      description: "Corpus Fund contribution",
       label: "Corpus Fund contribution",
     });
     if (tr > 0 && trip) out.push({
       type: "fund_contribution", amount: tr, account_id: sbi.id, fund_id: trip.id,
-      description: `Trip fund contribution ${TAG("rent")}`,
+      description: "Trip Fund contribution",
       label: "Trip Fund contribution",
     });
     return out;
