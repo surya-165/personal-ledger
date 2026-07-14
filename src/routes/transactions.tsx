@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, LogOut } from "lucide-react";
+import { Plus, LogOut, Calendar as CalendarIcon, X, Trash2, ChevronDown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -29,6 +29,12 @@ import {
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/transactions")({
@@ -40,8 +46,6 @@ export const Route = createFileRoute("/transactions")({
   }),
   component: TransactionsPage,
 });
-
-const ALL = "__all__";
 
 function TransactionsPage() {
   const { session, user, loading } = useAuth();
@@ -63,10 +67,12 @@ function TransactionsPage() {
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string>(ALL);
-  const [accountFilter, setAccountFilter] = useState<string>(ALL);
-  const [categoryFilter, setCategoryFilter] = useState<string>(ALL);
+  const [typeFilter, setTypeFilter] = useState<string[]>([]);
+  const [accountFilter, setAccountFilter] = useState<string[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<TxRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const data = dataQuery.data;
   const transactions = data?.transactions ?? [];
@@ -84,12 +90,34 @@ function TransactionsPage() {
     return transactions.filter((t) => {
       if (from && t.date < from) return false;
       if (to && t.date > to) return false;
-      if (typeFilter !== ALL && t.type !== (typeFilter as TxType)) return false;
-      if (accountFilter !== ALL && t.account_id !== accountFilter) return false;
-      if (categoryFilter !== ALL && t.category_id !== categoryFilter) return false;
+      if (typeFilter.length > 0 && !typeFilter.includes(t.type)) return false;
+      if (accountFilter.length > 0 && !accountFilter.includes(t.account_id)) return false;
+      if (categoryFilter.length > 0 && (!t.category_id || !categoryFilter.includes(t.category_id))) return false;
       return true;
     });
   }, [transactions, from, to, typeFilter, accountFilter, categoryFilter]);
+
+  const hasAnyFilter =
+    !!from || !!to || typeFilter.length > 0 || accountFilter.length > 0 || categoryFilter.length > 0;
+  const clearAll = () => {
+    setFrom(""); setTo("");
+    setTypeFilter([]); setAccountFilter([]); setCategoryFilter([]);
+  };
+
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    const { error } = await supabase.from("transactions").delete().eq("id", pendingDelete.id);
+    setDeleting(false);
+    if (error) { toast.error(error.message); return; }
+    // Optimistic cache update
+    qc.setQueryData<Awaited<ReturnType<typeof fetchAll>>>(["finance", user!.id], (prev) =>
+      prev ? { ...prev, transactions: prev.transactions.filter((x) => x.id !== pendingDelete.id) } : prev,
+    );
+    qc.invalidateQueries({ queryKey: ["finance", user!.id] });
+    toast.success("Transaction deleted");
+    setPendingDelete(null);
+  }
 
   if (loading || !session) {
     return <div className="text-sm text-muted-foreground">Loading…</div>;
@@ -136,6 +164,7 @@ function TransactionsPage() {
               <CardContent className="pt-5">
                 <div className="text-xs text-muted-foreground">{a.name}</div>
                 <div className="text-lg font-semibold tabular-nums">{formatINR(balances[a.id] ?? 0)}</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">Current balance</div>
               </CardContent>
             </Card>
           ))}
@@ -144,37 +173,37 @@ function TransactionsPage() {
 
       <Card className="mb-5">
         <CardContent className="pt-6 grid grid-cols-2 md:grid-cols-5 gap-3">
-          <Field label="From"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></Field>
-          <Field label="To"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
+          <Field label="From"><DateInput value={from} onChange={setFrom} /></Field>
+          <Field label="To"><DateInput value={to} onChange={setTo} /></Field>
           <Field label="Type">
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All types</SelectItem>
-                {(Object.keys(txTypeLabel) as TxType[]).map((k) => (
-                  <SelectItem key={k} value={k}>{txTypeLabel[k]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MultiSelect
+              placeholder="All types"
+              value={typeFilter}
+              onChange={setTypeFilter}
+              options={(Object.keys(txTypeLabel) as TxType[]).map((k) => ({ value: k, label: txTypeLabel[k] }))}
+            />
           </Field>
           <Field label="Account">
-            <Select value={accountFilter} onValueChange={setAccountFilter}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All accounts</SelectItem>
-                {accounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <MultiSelect
+              placeholder="All accounts"
+              value={accountFilter}
+              onChange={setAccountFilter}
+              options={accounts.map((a) => ({ value: a.id, label: a.name }))}
+            />
           </Field>
           <Field label="Category">
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All categories</SelectItem>
-                {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <MultiSelect
+              placeholder="All categories"
+              value={categoryFilter}
+              onChange={setCategoryFilter}
+              options={categories.map((c) => ({ value: c.id, label: c.name }))}
+            />
           </Field>
+          {hasAnyFilter ? (
+            <div className="col-span-2 md:col-span-5 flex justify-end">
+              <Button size="sm" variant="ghost" onClick={clearAll}>Clear all</Button>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -201,7 +230,7 @@ function TransactionsPage() {
                   t.type === "fund_contribution" ||
                   t.type === "reserve_accrual";
                 return (
-                  <tr key={t.id} className="border-t border-border">
+                  <tr key={t.id} className="group border-t border-border">
                     <td className="px-5 py-3.5 tabular-nums text-muted-foreground whitespace-nowrap">{t.date}</td>
                     <td className="px-5 py-3.5">
                       {t.description || <span className="text-muted-foreground">—</span>}
@@ -224,12 +253,21 @@ function TransactionsPage() {
                     }>
                       {inflow ? "+" : isInternal ? "" : "−"}{formatINR(Number(t.amount))}
                     </td>
+                    <td className="pr-3 py-3.5 w-8">
+                      <button
+                        aria-label="Delete transaction"
+                        onClick={() => setPendingDelete(t)}
+                        className="text-muted-foreground hover:text-destructive md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-sm text-muted-foreground">
+                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-muted-foreground">
                     {dataQuery.isLoading ? "Loading…" : "No transactions yet. Use Add to record your first one."}
                   </td>
                 </tr>
@@ -238,7 +276,123 @@ function TransactionsPage() {
           </table>
         </CardContent>
       </Card>
+
+      <AlertDialog open={!!pendingDelete} onOpenChange={(o) => { if (!o) setPendingDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this transaction?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete ? (
+                <>
+                  {pendingDelete.description || txTypeLabel[pendingDelete.type]} on{" "}
+                  {formatDateLong(pendingDelete.date)} — {formatINR(Number(pendingDelete.amount))}. This cannot be undone.
+                </>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); confirmDelete(); }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
+  );
+}
+
+function formatDateLong(iso: string) {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function DateInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="relative">
+      <Input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="pr-9 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+      />
+      <CalendarIcon className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+    </div>
+  );
+}
+
+interface MSOption { value: string; label: string }
+function MultiSelect({
+  value, onChange, options, placeholder,
+}: { value: string[]; onChange: (v: string[]) => void; options: MSOption[]; placeholder: string }) {
+  const [open, setOpen] = useState(false);
+  const selected = options.filter((o) => value.includes(o.value));
+  const toggle = (v: string) => {
+    onChange(value.includes(v) ? value.filter((x) => x !== v) : [...value, v]);
+  };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="flex min-h-9 w-full items-center justify-between gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm text-left hover:bg-accent/30"
+        >
+          <div className="flex flex-wrap items-center gap-1 min-w-0">
+            {selected.length === 0 ? (
+              <span className="text-muted-foreground">{placeholder}</span>
+            ) : (
+              selected.map((o) => (
+                <span
+                  key={o.value}
+                  className="inline-flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-xs"
+                >
+                  {o.label}
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Remove ${o.label}`}
+                    onClick={(e) => { e.stopPropagation(); toggle(o.value); }}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); toggle(o.value); } }}
+                    className="rounded hover:bg-muted-foreground/20 cursor-pointer"
+                  >
+                    <X className="h-3 w-3" />
+                  </span>
+                </span>
+              ))
+            )}
+          </div>
+          <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-1" align="start">
+        <ul className="max-h-60 overflow-auto">
+          {options.map((o) => {
+            const checked = value.includes(o.value);
+            return (
+              <li key={o.value}>
+                <button
+                  type="button"
+                  onClick={() => toggle(o.value)}
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+                >
+                  <Checkbox checked={checked} className="pointer-events-none" />
+                  <span className="flex-1 text-left">{o.label}</span>
+                </button>
+              </li>
+            );
+          })}
+          {options.length === 0 ? (
+            <li className="px-2 py-2 text-xs text-muted-foreground">No options</li>
+          ) : null}
+        </ul>
+      </PopoverContent>
+    </Popover>
   );
 }
 
