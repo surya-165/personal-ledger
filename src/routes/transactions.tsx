@@ -47,8 +47,6 @@ export const Route = createFileRoute("/transactions")({
   component: TransactionsPage,
 });
 
-const ALL = "__all__";
-
 function TransactionsPage() {
   const { session, user, loading } = useAuth();
   const navigate = useNavigate();
