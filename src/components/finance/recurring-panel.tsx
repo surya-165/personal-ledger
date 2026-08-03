@@ -563,15 +563,6 @@ function LogRow({ row, loggedOn, busy, onLog, value, onValueChange }: { row: Pre
   );
 }
 
-function SmallField({ label, v, setV }: { label: string; v: string; setV: (s: string) => void }) {
-  return (
-    <div>
-      <label className="text-xs text-muted-foreground mb-1 block">{label}</label>
-      <Input type="number" min="0" step="0.01" value={v} onChange={(e) => setV(e.target.value)} />
-    </div>
-  );
-}
-
 function WaterfallStep({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-md border border-border">
