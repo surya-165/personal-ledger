@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
 
@@ -591,62 +590,5 @@ function FundLine({ label, target, fromResidual, fromTopUp }: { label: string; t
         {formatINR(fromResidual)} from SBI residual · {formatINR(fromTopUp)} from HDFC top-up
       </div>
     </div>
-  );
-}
-
-function GroupedTxList({ rows, sbiId, hdfcId }: { rows: PreviewRow[]; sbiId?: string; hdfcId?: string }) {
-  type Entry = { label: string; amount: number; sign: "+" | "-" };
-  const sbi: Entry[] = [];
-  const hdfc: Entry[] = [];
-  for (const r of rows) {
-    if (r.type === "transfer") {
-      // source debits, destination credits
-      if (r.account_id === hdfcId) hdfc.push({ label: r.label, amount: r.amount, sign: "-" });
-      if (r.destination_account_id === sbiId) sbi.push({ label: "HDFC top-up received", amount: r.amount, sign: "+" });
-      continue;
-    }
-    const credit = r.type === "income" || r.type === "reserve_accrual";
-    const entry: Entry = { label: r.label, amount: r.amount, sign: credit ? "+" : "-" };
-    if (r.account_id === sbiId) sbi.push(entry);
-    else if (r.account_id === hdfcId) hdfc.push(entry);
-  }
-  const groups = [
-    { name: "SBI", entries: sbi },
-    { name: "HDFC", entries: hdfc },
-  ].filter((g) => g.entries.length > 0);
-  const total = rows.length;
-  return (
-    <Collapsible>
-      <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/40">
-        <span className="text-muted-foreground">
-          {total} transaction{total === 1 ? "" : "s"} across {groups.length} account{groups.length === 1 ? "" : "s"}
-        </span>
-        <ChevronDown className="h-4 w-4 text-muted-foreground" />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="mt-2 space-y-3">
-          {groups.map((g) => (
-            <div key={g.name} className="rounded-md border border-border">
-              <div className="border-b border-border px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {g.name}
-              </div>
-              <ul className="divide-y divide-border">
-                {g.entries.map((e, i) => (
-                  <li key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                    <span className="min-w-0 truncate">{e.label}</span>
-                    <span className="tabular-nums text-muted-foreground">{e.sign}{formatINR(e.amount)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-          {total === 0 ? (
-            <div className="rounded-md border border-border px-3 py-3 text-xs text-muted-foreground">
-              Missing configuration — check that accounts, funds, tax reserve and Car EMI category exist in Setup.
-            </div>
-          ) : null}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
   );
 }
