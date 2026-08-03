@@ -325,6 +325,65 @@ function ConfirmDialog({
     onSaved();
   }
 
+  const [logging, setLogging] = useState<string | null>(null);
+
+  function payloadFor(r: PreviewRow, d: string) {
+    return {
+      user_id: user!.id,
+      date: d,
+      type: r.type,
+      amount: r.amount,
+      account_id: r.account_id,
+      destination_account_id: r.destination_account_id ?? null,
+      category_id: r.category_id ?? null,
+      fund_id: r.fund_id ?? null,
+      reserve_id: r.reserve_id ?? null,
+      description: r.description,
+      payment_mode: null,
+    };
+  }
+
+  // Log a single rent sub-transaction. When both fund contributions end up
+  // logged, the HDFC → SBI top-up transfer is generated automatically.
+  async function logOne(r: PreviewRow, d: string) {
+    if (!user) return;
+    setLogging(r.description);
+    const payload = [payloadFor(r, d)];
+
+    const isFund = r.description === "Corpus Fund contribution" || r.description === "Trip Fund contribution";
+    const other = r.description === "Corpus Fund contribution" ? "Trip Fund contribution" : "Corpus Fund contribution";
+    if (
+      isFund &&
+      loggedThisMonth.has(other) &&
+      !loggedThisMonth.has(RENT_TOPUP_DESC) &&
+      topUp > 0 &&
+      hdfc &&
+      sbi
+    ) {
+      payload.push(
+        payloadFor(
+          {
+            type: "transfer",
+            amount: topUp,
+            account_id: hdfc.id,
+            destination_account_id: sbi.id,
+            description: RENT_TOPUP_DESC,
+            label: "HDFC → SBI top-up transfer",
+          },
+          d,
+        ),
+      );
+    }
+
+    const { error } = await supabase.from("transactions").insert(payload as never);
+    setLogging(null);
+    if (error) { toast.error(error.message); return; }
+    toast.success(payload.length > 1 ? `${r.label} logged · top-up transfer added` : `${r.label} logged`);
+    onRefresh();
+  }
+
+  const stepRows = RENT_STEPS.map((s) => rows.find((r) => r.description === s)).filter(Boolean) as PreviewRow[];
+
   const titleMap: Record<TplId, string> = {
     salary: "Confirm salary credit",
     rent: "Monthly rent & SBI allocation",
@@ -398,7 +457,27 @@ function ConfirmDialog({
               <WaterfallFooter label="HDFC → SBI top-up required" amount={topUp} />
             </WaterfallStep>
 
-            <GroupedTxList rows={rows} sbiId={sbi?.id} hdfcId={hdfc?.id} />
+            <div className="rounded-md border border-border">
+              <div className="border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Log each transaction
+              </div>
+              <ul className="divide-y divide-border">
+                {stepRows.map((r) => (
+                  <LogRow
+                    key={r.description}
+                    row={r}
+                    loggedOn={loggedThisMonth.get(r.description) ?? null}
+                    busy={logging === r.description}
+                    onLog={(d) => logOne(r, d)}
+                  />
+                ))}
+                {stepRows.length === 0 ? (
+                  <li className="px-3 py-3 text-xs text-muted-foreground">
+                    Missing configuration — check accounts, funds, tax reserve and Car EMI category in Setup.
+                  </li>
+                ) : null}
+              </ul>
+            </div>
           </div>
         ) : (
           <div className="mt-3">
@@ -420,13 +499,45 @@ function ConfirmDialog({
         )}
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button onClick={save} disabled={busy || rows.length === 0}>
-            {busy ? "Saving…" : `Confirm ${rows.length} row${rows.length === 1 ? "" : "s"}`}
-          </Button>
+          {isRent ? (
+            <Button onClick={onClose}>Close</Button>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+              <Button onClick={save} disabled={busy || rows.length === 0}>
+                {busy ? "Saving…" : `Confirm ${rows.length} row${rows.length === 1 ? "" : "s"}`}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function LogRow({ row, loggedOn, busy, onLog }: { row: PreviewRow; loggedOn: string | null; busy: boolean; onLog: (date: string) => void }) {
+  const [d, setD] = useState(todayISO());
+  const logged = !!loggedOn;
+  return (
+    <li className={`flex items-center gap-3 px-3 py-2.5 ${logged ? "opacity-50" : ""}`}>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm">{row.label}</div>
+        <div className="text-xs tabular-nums text-muted-foreground">{formatINR(row.amount)}</div>
+      </div>
+      {logged ? (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Check className="h-4 w-4 text-primary" />
+          <span className="tabular-nums">{loggedOn}</span>
+        </div>
+      ) : (
+        <>
+          <Input type="date" value={d} onChange={(e) => setD(e.target.value)} className="h-8 w-[140px] text-xs" />
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => onLog(d)}>
+            {busy ? "…" : "Log this"}
+          </Button>
+        </>
+      )}
+    </li>
   );
 }
 
