@@ -199,8 +199,15 @@ function todayISO() {
 }
 
 function ConfirmDialog({
-  templateId, ctx, onClose, onSaved,
-}: { templateId: TplId; ctx: Ctx; onClose: () => void; onSaved: () => void }) {
+  templateId, ctx, loggedThisMonth, onClose, onSaved, onRefresh,
+}: {
+  templateId: TplId;
+  ctx: Ctx;
+  loggedThisMonth: Map<string, string>;
+  onClose: () => void;
+  onSaved: () => void;
+  onRefresh: () => void;
+}) {
   const { user } = useAuth();
   const hdfc = ctx.accounts.find((a) => a.code === "HDFC");
   const cub = ctx.accounts.find((a) => a.code === "CUB");
