@@ -383,6 +383,23 @@ function ConfirmDialog({
 
   const stepRows = RENT_STEPS.map((s) => rows.find((r) => r.description === s)).filter(Boolean) as PreviewRow[];
 
+  // Inline-editable amounts in the "Log each transaction" list, wired back to
+  // the same state that drives the waterfall above.
+  const stepEditors: Record<string, (v: string) => void> = {
+    "Rental income credited": setAmount,
+    "Tax reserve set aside": setTaxAmt,
+    "Car EMI": setEmiAmt,
+    "Corpus Fund contribution": setCorpusAmt,
+    "Trip Fund contribution": setTripAmt,
+  };
+  const stepValues: Record<string, string> = {
+    "Rental income credited": amount,
+    "Tax reserve set aside": taxAmt,
+    "Car EMI": emiAmt,
+    "Corpus Fund contribution": corpusAmt,
+    "Trip Fund contribution": tripAmt,
+  };
+
   const titleMap: Record<TplId, string> = {
     salary: "Confirm salary credit",
     rent: "Monthly rent & SBI allocation",
@@ -403,6 +420,7 @@ function ConfirmDialog({
           <DialogTitle>{titleMap[templateId]}</DialogTitle>
         </DialogHeader>
 
+        {isRent ? null : (
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-xs text-muted-foreground mb-1.5 block">
@@ -415,18 +433,7 @@ function ConfirmDialog({
             <Input type="date" value={date} onChange={(ev) => setDate(ev.target.value)} />
           </div>
         </div>
-
-        {isRent ? (
-          <div className="mt-2 space-y-2">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">SBI monthly outflows</div>
-            <div className="grid grid-cols-2 gap-3">
-              <SmallField label="Car EMI" v={emiAmt} setV={setEmiAmt} />
-              <SmallField label="Tax reserve accrual" v={taxAmt} setV={setTaxAmt} />
-              <SmallField label="Corpus fund" v={corpusAmt} setV={setCorpusAmt} />
-              <SmallField label="Trip fund" v={tripAmt} setV={setTripAmt} />
-            </div>
-          </div>
-        ) : null}
+        )}
 
         {isRent ? (
           <div className="mt-3 space-y-3">
@@ -465,6 +472,8 @@ function ConfirmDialog({
                   <LogRow
                     key={r.description}
                     row={r}
+                    value={stepValues[r.description] ?? String(r.amount)}
+                    onValueChange={stepEditors[r.description]}
                     loggedOn={loggedThisMonth.get(r.description) ?? null}
                     busy={logging === r.description}
                     onLog={(d) => logOne(r, d)}
@@ -514,14 +523,28 @@ function ConfirmDialog({
   );
 }
 
-function LogRow({ row, loggedOn, busy, onLog }: { row: PreviewRow; loggedOn: string | null; busy: boolean; onLog: (date: string) => void }) {
+function LogRow({ row, loggedOn, busy, onLog, value, onValueChange }: { row: PreviewRow; loggedOn: string | null; busy: boolean; onLog: (date: string) => void; value: string; onValueChange?: (v: string) => void }) {
   const [d, setD] = useState(todayISO());
   const logged = !!loggedOn;
   return (
     <li className={`flex items-center gap-3 px-3 py-2.5 ${logged ? "opacity-50" : ""}`}>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm">{row.label}</div>
-        <div className="text-xs tabular-nums text-muted-foreground">{formatINR(row.amount)}</div>
+        {logged || !onValueChange ? (
+          <div className="text-xs tabular-nums text-muted-foreground">{formatINR(row.amount)}</div>
+        ) : (
+          <div className="mt-0.5 flex items-center gap-1">
+            <span className="text-xs text-muted-foreground">₹</span>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={value}
+              onChange={(e) => onValueChange(e.target.value)}
+              className="h-6 w-[92px] border-0 border-b border-border bg-transparent px-1 py-0 text-xs tabular-nums shadow-none rounded-none focus-visible:ring-0 focus-visible:border-primary"
+            />
+          </div>
+        )}
       </div>
       {logged ? (
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
