@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
 
@@ -31,6 +30,18 @@ interface Ctx {
 }
 
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+
+const RENT_TOPUP_DESC = "Monthly top-up to SBI for fund contributions";
+
+// The five individually loggable sub-transactions of the rent allocation.
+const RENT_STEPS = [
+  "Rental income credited",
+  "Tax reserve set aside",
+  "Car EMI",
+  "Corpus Fund contribution",
+  "Trip Fund contribution",
+] as const;
+type RentStep = (typeof RENT_STEPS)[number];
 
 // Clean human-readable descriptions written by each template. Also used to
 // detect whether the template has already run this month.
@@ -55,6 +66,7 @@ function findByName<T extends { name: string }>(list: T[], needle: string): T | 
 export function RecurringPanel() {
   const { user } = useAuth();
   const qc = useQueryClient();
+  const [sectionOpen, setSectionOpen] = useState(true);
 
   const q = useQuery({
     queryKey: ["recurring-ctx", user?.id],
@@ -76,64 +88,88 @@ export function RecurringPanel() {
   const ctx = q.data;
   const [open, setOpen] = useState<TplId | null>(null);
 
-  const ranThisMonth = useMemo(() => {
+  // description -> date it was logged, for the current month only
+  const loggedThisMonth = useMemo(() => {
     const key = monthKey(new Date());
-    const set = new Set<TplId>();
-    if (!ctx) return set;
+    const map = new Map<string, string>();
+    if (!ctx) return map;
     for (const t of ctx.transactions) {
       if (!t.date.startsWith(key)) continue;
       const d = t.description || "";
-      (["salary", "rent", "hdfc_cub"] as TplId[]).forEach((id) => {
-        if (RECURRING_DESCRIPTIONS[id].includes(d)) set.add(id);
-      });
+      if (d && !map.has(d)) map.set(d, t.date);
     }
-    return set;
+    return map;
   }, [ctx]);
 
   if (!ctx) return null;
 
-  const templates: Array<{ id: TplId; title: string; subtitle: string; defaultAmount: number }> = [
-    { id: "salary", title: "Salary credit", subtitle: "→ HDFC", defaultAmount: ctx.recurring["Salary"]?.amount ?? 0 },
-    { id: "rent", title: "Monthly rent & SBI allocation", subtitle: "Rent → SBI · auto-splits maintenance, tax reserve, EMI, fund contributions & HDFC top-up", defaultAmount: ctx.recurring["Rent"]?.amount ?? 0 },
-    { id: "hdfc_cub", title: "HDFC → CUB transfer", subtitle: "monthly spending allowance", defaultAmount: ctx.recurring["HDFC→CUB"]?.amount ?? 0 },
+  const rentLoggedCount = RENT_STEPS.filter((s) => loggedThisMonth.has(s)).length;
+  const rentDone = rentLoggedCount === RENT_STEPS.length;
+  const salaryDone = RECURRING_DESCRIPTIONS.salary.some((d) => loggedThisMonth.has(d));
+  const cubDone = RECURRING_DESCRIPTIONS.hdfc_cub.some((d) => loggedThisMonth.has(d));
+
+  const all: Array<{ id: TplId; title: string; subtitle: string; defaultAmount: number; done: boolean }> = [
+    { id: "salary", title: "Salary credit", subtitle: "→ HDFC", defaultAmount: ctx.recurring["Salary"]?.amount ?? 0, done: salaryDone },
+    {
+      id: "rent",
+      title: "Monthly rent & SBI allocation",
+      subtitle: `${rentLoggedCount} of ${RENT_STEPS.length} done · ${RENT_STEPS.length - rentLoggedCount} remaining`,
+      defaultAmount: ctx.recurring["Rent"]?.amount ?? 0,
+      done: rentDone,
+    },
+    { id: "hdfc_cub", title: "HDFC → CUB transfer", subtitle: "monthly spending allowance", defaultAmount: ctx.recurring["HDFC→CUB"]?.amount ?? 0, done: cubDone },
   ];
+  const templates = all.filter((t) => !t.done);
+  const doneCount = all.length - templates.length;
+
+  // Everything for this month is logged — the section disappears entirely.
+  if (templates.length === 0) return null;
 
   return (
     <Card className="mb-6">
-      <CardHeader className="pb-3">
-        <div className="flex items-center gap-2">
-          <CalendarClock className="h-4 w-4 text-muted-foreground" />
-          <CardTitle className="text-base font-medium">This month's recurring</CardTitle>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {templates.map((t) => {
-            const done = ranThisMonth.has(t.id);
-            return (
-              <div key={t.id} className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium flex items-center gap-2">
-                    {t.title}
-                    {done ? <Badge variant="secondary" className="font-normal"><Check className="h-3 w-3 mr-1" />done</Badge> : null}
+      <Collapsible open={sectionOpen} onOpenChange={setSectionOpen}>
+        <CollapsibleTrigger asChild>
+          <CardHeader className="pb-3 cursor-pointer select-none">
+            <div className="flex items-center gap-2">
+              <CalendarClock className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-base font-medium">This month's recurring</CardTitle>
+              <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+                {doneCount} of {all.length} done this month
+                <ChevronDown className={`h-4 w-4 transition-transform ${sectionOpen ? "rotate-180" : ""}`} />
+              </span>
+            </div>
+          </CardHeader>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {templates.map((t) => (
+                <div key={t.id} className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{t.title}</div>
+                    <div className="text-xs text-muted-foreground truncate">{t.subtitle}</div>
+                    <div className="text-xs tabular-nums text-muted-foreground mt-0.5">Default {formatINR(t.defaultAmount)}</div>
                   </div>
-                  <div className="text-xs text-muted-foreground truncate">{t.subtitle}</div>
-                  <div className="text-xs tabular-nums text-muted-foreground mt-0.5">Default {formatINR(t.defaultAmount)}</div>
+                  <Button size="sm" onClick={() => setOpen(t.id)}>
+                    {t.id === "rent" ? "Open" : "Confirm"}
+                  </Button>
                 </div>
-                <Button size="sm" variant={done ? "outline" : "default"} onClick={() => setOpen(t.id)}>
-                  {done ? "Run again" : "Confirm"}
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-      </CardContent>
+              ))}
+            </div>
+          </CardContent>
+        </CollapsibleContent>
+      </Collapsible>
 
       {open ? (
         <ConfirmDialog
           templateId={open}
           ctx={ctx}
+          loggedThisMonth={loggedThisMonth}
           onClose={() => setOpen(null)}
+          onRefresh={() => {
+            qc.invalidateQueries({ queryKey: ["finance", user!.id] });
+            qc.invalidateQueries({ queryKey: ["recurring-ctx", user!.id] });
+          }}
           onSaved={() => {
             setOpen(null);
             qc.invalidateQueries({ queryKey: ["finance", user!.id] });
@@ -162,8 +198,15 @@ function todayISO() {
 }
 
 function ConfirmDialog({
-  templateId, ctx, onClose, onSaved,
-}: { templateId: TplId; ctx: Ctx; onClose: () => void; onSaved: () => void }) {
+  templateId, ctx, loggedThisMonth, onClose, onSaved, onRefresh,
+}: {
+  templateId: TplId;
+  ctx: Ctx;
+  loggedThisMonth: Map<string, string>;
+  onClose: () => void;
+  onSaved: () => void;
+  onRefresh: () => void;
+}) {
   const { user } = useAuth();
   const hdfc = ctx.accounts.find((a) => a.code === "HDFC");
   const cub = ctx.accounts.find((a) => a.code === "CUB");
@@ -281,6 +324,65 @@ function ConfirmDialog({
     onSaved();
   }
 
+  const [logging, setLogging] = useState<string | null>(null);
+
+  function payloadFor(r: PreviewRow, d: string) {
+    return {
+      user_id: user!.id,
+      date: d,
+      type: r.type,
+      amount: r.amount,
+      account_id: r.account_id,
+      destination_account_id: r.destination_account_id ?? null,
+      category_id: r.category_id ?? null,
+      fund_id: r.fund_id ?? null,
+      reserve_id: r.reserve_id ?? null,
+      description: r.description,
+      payment_mode: null,
+    };
+  }
+
+  // Log a single rent sub-transaction. When both fund contributions end up
+  // logged, the HDFC → SBI top-up transfer is generated automatically.
+  async function logOne(r: PreviewRow, d: string) {
+    if (!user) return;
+    setLogging(r.description);
+    const payload = [payloadFor(r, d)];
+
+    const isFund = r.description === "Corpus Fund contribution" || r.description === "Trip Fund contribution";
+    const other = r.description === "Corpus Fund contribution" ? "Trip Fund contribution" : "Corpus Fund contribution";
+    if (
+      isFund &&
+      loggedThisMonth.has(other) &&
+      !loggedThisMonth.has(RENT_TOPUP_DESC) &&
+      topUp > 0 &&
+      hdfc &&
+      sbi
+    ) {
+      payload.push(
+        payloadFor(
+          {
+            type: "transfer",
+            amount: topUp,
+            account_id: hdfc.id,
+            destination_account_id: sbi.id,
+            description: RENT_TOPUP_DESC,
+            label: "HDFC → SBI top-up transfer",
+          },
+          d,
+        ),
+      );
+    }
+
+    const { error } = await supabase.from("transactions").insert(payload as never);
+    setLogging(null);
+    if (error) { toast.error(error.message); return; }
+    toast.success(payload.length > 1 ? `${r.label} logged · top-up transfer added` : `${r.label} logged`);
+    onRefresh();
+  }
+
+  const stepRows = RENT_STEPS.map((s) => rows.find((r) => r.description === s)).filter(Boolean) as PreviewRow[];
+
   const titleMap: Record<TplId, string> = {
     salary: "Confirm salary credit",
     rent: "Monthly rent & SBI allocation",
@@ -354,7 +456,27 @@ function ConfirmDialog({
               <WaterfallFooter label="HDFC → SBI top-up required" amount={topUp} />
             </WaterfallStep>
 
-            <GroupedTxList rows={rows} sbiId={sbi?.id} hdfcId={hdfc?.id} />
+            <div className="rounded-md border border-border">
+              <div className="border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Log each transaction
+              </div>
+              <ul className="divide-y divide-border">
+                {stepRows.map((r) => (
+                  <LogRow
+                    key={r.description}
+                    row={r}
+                    loggedOn={loggedThisMonth.get(r.description) ?? null}
+                    busy={logging === r.description}
+                    onLog={(d) => logOne(r, d)}
+                  />
+                ))}
+                {stepRows.length === 0 ? (
+                  <li className="px-3 py-3 text-xs text-muted-foreground">
+                    Missing configuration — check accounts, funds, tax reserve and Car EMI category in Setup.
+                  </li>
+                ) : null}
+              </ul>
+            </div>
           </div>
         ) : (
           <div className="mt-3">
@@ -376,13 +498,45 @@ function ConfirmDialog({
         )}
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button onClick={save} disabled={busy || rows.length === 0}>
-            {busy ? "Saving…" : `Confirm ${rows.length} row${rows.length === 1 ? "" : "s"}`}
-          </Button>
+          {isRent ? (
+            <Button onClick={onClose}>Close</Button>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+              <Button onClick={save} disabled={busy || rows.length === 0}>
+                {busy ? "Saving…" : `Confirm ${rows.length} row${rows.length === 1 ? "" : "s"}`}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function LogRow({ row, loggedOn, busy, onLog }: { row: PreviewRow; loggedOn: string | null; busy: boolean; onLog: (date: string) => void }) {
+  const [d, setD] = useState(todayISO());
+  const logged = !!loggedOn;
+  return (
+    <li className={`flex items-center gap-3 px-3 py-2.5 ${logged ? "opacity-50" : ""}`}>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm">{row.label}</div>
+        <div className="text-xs tabular-nums text-muted-foreground">{formatINR(row.amount)}</div>
+      </div>
+      {logged ? (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Check className="h-4 w-4 text-primary" />
+          <span className="tabular-nums">{loggedOn}</span>
+        </div>
+      ) : (
+        <>
+          <Input type="date" value={d} onChange={(e) => setD(e.target.value)} className="h-8 w-[140px] text-xs" />
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => onLog(d)}>
+            {busy ? "…" : "Log this"}
+          </Button>
+        </>
+      )}
+    </li>
   );
 }
 
@@ -436,62 +590,5 @@ function FundLine({ label, target, fromResidual, fromTopUp }: { label: string; t
         {formatINR(fromResidual)} from SBI residual · {formatINR(fromTopUp)} from HDFC top-up
       </div>
     </div>
-  );
-}
-
-function GroupedTxList({ rows, sbiId, hdfcId }: { rows: PreviewRow[]; sbiId?: string; hdfcId?: string }) {
-  type Entry = { label: string; amount: number; sign: "+" | "-" };
-  const sbi: Entry[] = [];
-  const hdfc: Entry[] = [];
-  for (const r of rows) {
-    if (r.type === "transfer") {
-      // source debits, destination credits
-      if (r.account_id === hdfcId) hdfc.push({ label: r.label, amount: r.amount, sign: "-" });
-      if (r.destination_account_id === sbiId) sbi.push({ label: "HDFC top-up received", amount: r.amount, sign: "+" });
-      continue;
-    }
-    const credit = r.type === "income" || r.type === "reserve_accrual";
-    const entry: Entry = { label: r.label, amount: r.amount, sign: credit ? "+" : "-" };
-    if (r.account_id === sbiId) sbi.push(entry);
-    else if (r.account_id === hdfcId) hdfc.push(entry);
-  }
-  const groups = [
-    { name: "SBI", entries: sbi },
-    { name: "HDFC", entries: hdfc },
-  ].filter((g) => g.entries.length > 0);
-  const total = rows.length;
-  return (
-    <Collapsible>
-      <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/40">
-        <span className="text-muted-foreground">
-          {total} transaction{total === 1 ? "" : "s"} across {groups.length} account{groups.length === 1 ? "" : "s"}
-        </span>
-        <ChevronDown className="h-4 w-4 text-muted-foreground" />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="mt-2 space-y-3">
-          {groups.map((g) => (
-            <div key={g.name} className="rounded-md border border-border">
-              <div className="border-b border-border px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {g.name}
-              </div>
-              <ul className="divide-y divide-border">
-                {g.entries.map((e, i) => (
-                  <li key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                    <span className="min-w-0 truncate">{e.label}</span>
-                    <span className="tabular-nums text-muted-foreground">{e.sign}{formatINR(e.amount)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-          {total === 0 ? (
-            <div className="rounded-md border border-border px-3 py-3 text-xs text-muted-foreground">
-              Missing configuration — check that accounts, funds, tax reserve and Car EMI category exist in Setup.
-            </div>
-          ) : null}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
   );
 }
