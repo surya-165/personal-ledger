@@ -449,7 +449,7 @@ function todayISO() {
 }
 
 function AddTransactionDialog({
-  accounts, categories, funds, reserves, userId, onSaved,
+  accounts, categories, funds, reserves, userId, onSaved, editing,
 }: {
   accounts: AccountRow[];
   categories: CategoryRow[];
@@ -457,24 +457,27 @@ function AddTransactionDialog({
   reserves: ReserveRow[];
   userId: string;
   onSaved: () => void;
+  editing?: TxRow;
 }) {
   const cub = accounts.find((a) => a.code === "CUB");
   const sbi = accounts.find((a) => a.code === "SBI");
 
-  const [type, setType] = useState<TxType>("expense");
-  const [date, setDate] = useState(todayISO());
-  const [amount, setAmount] = useState("");
-  const [description, setDescription] = useState("");
-  const [paymentMode, setPaymentMode] = useState<string>("");
-  const [accountId, setAccountId] = useState<string>(cub?.id ?? accounts[0]?.id ?? "");
-  const [destinationId, setDestinationId] = useState<string>("");
-  const [categoryId, setCategoryId] = useState<string>("");
-  const [fundId, setFundId] = useState<string>("");
-  const [reserveId, setReserveId] = useState<string>("");
+  const [type, setType] = useState<TxType>(editing?.type ?? "expense");
+  const [date, setDate] = useState(editing?.date ?? todayISO());
+  const [amount, setAmount] = useState(editing ? String(editing.amount) : "");
+  const [description, setDescription] = useState(editing?.description ?? "");
+  const [paymentMode, setPaymentMode] = useState<string>(editing?.payment_mode ?? "");
+  const [accountId, setAccountId] = useState<string>(editing?.account_id ?? cub?.id ?? accounts[0]?.id ?? "");
+  const [destinationId, setDestinationId] = useState<string>(editing?.destination_account_id ?? "");
+  const [categoryId, setCategoryId] = useState<string>(editing?.category_id ?? "");
+  const [fundId, setFundId] = useState<string>(editing?.fund_id ?? "");
+  const [reserveId, setReserveId] = useState<string>(editing?.reserve_id ?? "");
   const [busy, setBusy] = useState(false);
 
-  // When the type changes, reset to sensible defaults.
+  // When the type changes, reset to sensible defaults (skip the first run when editing).
+  const skipReset = useRef(!!editing);
   useEffect(() => {
+    if (skipReset.current) { skipReset.current = false; return; }
     setCategoryId("");
     setFundId("");
     setReserveId("");
@@ -533,18 +536,25 @@ function AddTransactionDialog({
     }
 
     setBusy(true);
-    const { error } = await supabase.from("transactions").insert(row as never);
+    let error;
+    if (editing) {
+      const { user_id: _omit, ...patch } = row as Record<string, unknown> & { user_id: unknown };
+      void _omit;
+      ({ error } = await supabase.from("transactions").update(patch as never).eq("id", editing.id));
+    } else {
+      ({ error } = await supabase.from("transactions").insert(row as never));
+    }
     setBusy(false);
     if (error) { toast.error(error.message); return; }
-    toast.success(`${txTypeLabel[type]} saved`);
-    setAmount(""); setDescription(""); setPaymentMode("");
+    toast.success(editing ? "Transaction updated" : `${txTypeLabel[type]} saved`);
+    if (!editing) { setAmount(""); setDescription(""); setPaymentMode(""); }
     onSaved();
   }
 
   return (
     <DialogContent className="sm:max-w-lg">
       <DialogHeader>
-        <DialogTitle>Add transaction</DialogTitle>
+        <DialogTitle>{editing ? "Edit transaction" : "Add transaction"}</DialogTitle>
       </DialogHeader>
 
       <div className="grid grid-cols-2 gap-3">
@@ -662,7 +672,9 @@ function AddTransactionDialog({
       </div>
 
       <DialogFooter>
-        <Button onClick={save} disabled={busy}>{busy ? "Saving…" : "Save transaction"}</Button>
+        <Button onClick={save} disabled={busy}>
+          {busy ? "Saving…" : editing ? "Save changes" : "Save transaction"}
+        </Button>
       </DialogFooter>
     </DialogContent>
   );
