@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, LogOut, Calendar as CalendarIcon, X, Trash2, ChevronDown } from "lucide-react";
+import { Plus, LogOut, Calendar as CalendarIcon, X, Trash2, Pencil, ChevronDown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -65,12 +65,13 @@ function TransactionsPage() {
     },
   });
 
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [from, setFrom] = useState(monthStartISO());
+  const [to, setTo] = useState(monthEndISO());
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
   const [accountFilter, setAccountFilter] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<TxRow | null>(null);
   const [pendingDelete, setPendingDelete] = useState<TxRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -254,13 +255,22 @@ function TransactionsPage() {
                       {inflow ? "+" : isInternal ? "" : "−"}{formatINR(Number(t.amount))}
                     </td>
                     <td className="pr-3 py-3.5 w-8">
-                      <button
-                        aria-label="Delete transaction"
-                        onClick={() => setPendingDelete(t)}
-                        className="text-muted-foreground hover:text-destructive md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center gap-2 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                        <button
+                          aria-label="Edit transaction"
+                          onClick={() => setEditing(t)}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          aria-label="Delete transaction"
+                          onClick={() => setPendingDelete(t)}
+                          className="text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -276,6 +286,24 @@ function TransactionsPage() {
           </table>
         </CardContent>
       </Card>
+
+      <Dialog open={!!editing} onOpenChange={(o) => { if (!o) setEditing(null); }}>
+        {editing ? (
+          <AddTransactionDialog
+            key={editing.id}
+            accounts={accounts}
+            categories={categories}
+            funds={funds}
+            reserves={reserves}
+            userId={user!.id}
+            editing={editing}
+            onSaved={() => {
+              setEditing(null);
+              qc.invalidateQueries({ queryKey: ["finance", user!.id] });
+            }}
+          />
+        ) : null}
+      </Dialog>
 
       <AlertDialog open={!!pendingDelete} onOpenChange={(o) => { if (!o) setPendingDelete(null); }}>
         <AlertDialogContent>
@@ -311,6 +339,16 @@ function formatDateLong(iso: string) {
   if (!y || !m || !d) return iso;
   const dt = new Date(Date.UTC(y, m - 1, d));
   return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function monthStartISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function monthEndISO() {
+  const d = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function DateInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
