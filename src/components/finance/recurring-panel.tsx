@@ -36,8 +36,8 @@ const RENT_TOPUP_DESC = "Monthly top-up to SBI for fund contributions";
 // The five individually loggable sub-transactions of the rent allocation.
 const RENT_STEPS = [
   "Rental income credited",
-  "Tax reserve set aside",
   "Car EMI",
+  "Tax reserve set aside",
   "Corpus Fund contribution",
   "Trip Fund contribution",
 ] as const;
@@ -48,10 +48,10 @@ type RentStep = (typeof RENT_STEPS)[number];
 const RECURRING_DESCRIPTIONS: Record<TplId, string[]> = {
   salary: ["Salary credited"],
   hdfc_cub: ["Monthly transfer to CUB for regular expenses"],
-  rent: [
+rent: [
     "Rental income credited",
-    "Tax reserve set aside",
     "Car EMI",
+    "Tax reserve set aside",
     "Monthly top-up to SBI for fund contributions",
     "Corpus Fund contribution",
     "Trip Fund contribution",
@@ -268,7 +268,7 @@ function ConfirmDialog({
       description: "Tax reserve set aside",
       label: "Tax reserve earmark",
     });
-    if (e > 0 && emiCat) out.push({
+    if (emiCat) out.push({
       type: "expense", amount: e, account_id: sbi.id, category_id: emiCat.id,
       description: "Car EMI",
       label: "Car EMI",
