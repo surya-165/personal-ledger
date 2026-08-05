@@ -158,12 +158,12 @@ function TransactionsPage() {
       </div>
 
       {accounts.length > 0 ? (
-        <div className="grid grid-cols-3 gap-3 mb-5">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
           {accounts.map((a) => (
-            <Card key={a.id}>
-              <CardContent className="pt-5">
-                <div className="text-xs text-muted-foreground">{a.name}</div>
-                <div className="text-lg font-semibold tabular-nums">{formatINR(balances[a.id] ?? 0)}</div>
+            <Card key={a.id} className="w-full min-w-0">
+              <CardContent className="pt-5 min-w-0">
+                <div className="text-xs text-muted-foreground truncate">{a.name}</div>
+                <div className="text-lg font-semibold tabular-nums break-words">{formatINR(balances[a.id] ?? 0)}</div>
                 <div className="text-[11px] text-muted-foreground mt-0.5">Current balance</div>
               </CardContent>
             </Card>
