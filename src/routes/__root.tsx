@@ -7,7 +7,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -122,6 +122,18 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const router = useRouter();
+  const didRedirect = useRef(false);
+
+  // Always land on the Dashboard on a fresh page load / refresh.
+  useEffect(() => {
+    if (didRedirect.current) return;
+    didRedirect.current = true;
+    const path = window.location.pathname;
+    if (path !== "/" && path !== "/auth" && !path.startsWith("/api")) {
+      router.navigate({ to: "/", replace: true });
+    }
+  }, [router]);
 
   return (
     <QueryClientProvider client={queryClient}>

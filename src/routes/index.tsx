@@ -358,7 +358,9 @@ function Level2Regular({
         <CardContent className="pt-4 divide-y divide-border">
           {categories.length === 0 ? (
             <div className="py-6 text-sm text-muted-foreground">No categories yet — add them in Setup.</div>
-          ) : categories.map((c) => {
+          ) : [...categories]
+            .sort((a, b) => (spentByCategory[b.id] ?? 0) - (spentByCategory[a.id] ?? 0))
+            .map((c) => {
             const spent = spentByCategory[c.id] ?? 0;
             const limit = Number(c.monthly_limit) || 0;
             const tone = statusTone(spent, limit);
