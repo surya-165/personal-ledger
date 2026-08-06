@@ -99,14 +99,24 @@ function Dashboard() {
     return m;
   }, [monthTx]);
 
-  // Split categories: Car EMI / Maintenance are Fixed Commitments; everything else is Regular.
+  // Split categories: only Car EMI and Flat Maintenance are Fixed Commitments.
+  // "Car Maintenance" stays a Regular Expense category.
   const isFixedCat = (name: string) => {
-    const n = name.toLowerCase();
-    return n.includes("car emi") || n === "maintenance" || n.includes("maintenance");
+    const n = name.trim().toLowerCase();
+    return n === "car emi" || n === "maintenance" || n === "flat maintenance";
   };
-  const carEmiCat = categories.find((c) => c.name.toLowerCase().includes("car emi"));
-  const maintenanceCat = categories.find((c) => c.name.toLowerCase().includes("maintenance"));
+  const carEmiCat = categories.find((c) => c.name.trim().toLowerCase() === "car emi");
+  const maintenanceCat = categories.find((c) => {
+    const n = c.name.trim().toLowerCase();
+    return n === "flat maintenance" || n === "maintenance";
+  });
   const regularCategories = categories.filter((c) => !isFixedCat(c.name));
+  const maintenanceDueMonths = [1, 4, 7, 10];
+  const maintenanceDue = maintenanceDueMonths.includes(month);
+  const nextMaintenanceMonth = (() => {
+    const next = maintenanceDueMonths.find((m) => m > month) ?? maintenanceDueMonths[0];
+    return new Date(2000, next - 1, 1).toLocaleDateString("en-IN", { month: "long" });
+  })();
 
   if (loading || !session) return <div className="text-sm text-muted-foreground">Loading…</div>;
   if (dataQuery.isLoading || !data || planQuery.isLoading || !planData) {
@@ -116,12 +126,14 @@ function Dashboard() {
   // Planned figures — ALL from Setup
   const plannedIncome = Number(planData.plan?.planned_monthly_income ?? 0);
   const plannedRegular = Number(planData.recurring["HDFC→CUB"] ?? 0);
-  const plannedSIP = investments.reduce((s, i) => s + Number(i.monthly_amount ?? 0), 0);
+  const activeInvestments = investments.filter((i) => (i as { active?: boolean }).active !== false);
+  const plannedSIP = activeInvestments.reduce((s, i) => s + Number(i.monthly_amount ?? 0), 0);
   const plannedFundsTotal =
     Number(planData.plan?.planned_corpus_contribution ?? 0) +
     Number(planData.plan?.planned_trip_contribution ?? 0);
   const plannedCarEmi = Number(planData.plan?.planned_car_emi ?? 0);
-  const plannedMaintenance = Number(planData.plan?.planned_maintenance ?? 0);
+  const plannedMaintenanceRaw = Number(planData.plan?.planned_maintenance ?? 0);
+  const plannedMaintenance = maintenanceDue ? plannedMaintenanceRaw : 0;
   const plannedFixed = plannedCarEmi + plannedMaintenance;
   const plannedTax = Number(planData.plan?.planned_tax_reserve ?? 0);
 
@@ -145,6 +157,8 @@ function Dashboard() {
   const actualSIP = Object.values(actualSIPByInvestment).reduce((s, n) => s + n, 0);
 
   const totalAllocated = actualRegular + actualSIP + actualFunds + actualFixed + actualTax;
+  const totalPlannedBuckets = plannedRegular + plannedSIP + plannedFundsTotal + plannedFixed + plannedTax;
+  const plannedUnallocated = plannedIncome - totalPlannedBuckets;
   const unallocated = plannedIncome - totalAllocated;
   const remainderMissing = Math.abs(unallocated) > 0.5;
 
