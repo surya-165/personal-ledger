@@ -411,7 +411,7 @@ function Level2Regular({
 function Level2SIP({
   investments, actualByInvestment, plannedSIP, actualSIP, onBack,
 }: {
-  investments: Array<{ id: string; name: string; goal: string; monthly_amount: number }>;
+  investments: Array<{ id: string; name: string; goal: string; monthly_amount: number; active?: boolean }>;
   actualByInvestment: Record<string, number>;
   plannedSIP: number;
   actualSIP: number;
@@ -425,16 +425,21 @@ function Level2SIP({
         <CardContent className="pt-4 divide-y divide-border">
           {investments.length === 0 ? (
             <div className="py-6 text-sm text-muted-foreground">No SIPs yet — add them in Setup.</div>
-          ) : investments.map((inv) => {
+          ) : [...investments]
+              .sort((a, b) => Number(b.active !== false) - Number(a.active !== false))
+              .map((inv) => {
+            const stopped = inv.active === false;
             const actual = actualByInvestment[inv.id] ?? 0;
-            const planned = Number(inv.monthly_amount) || 0;
+            const planned = stopped ? 0 : Number(inv.monthly_amount) || 0;
             const tone = statusTone(actual, planned);
             return (
-              <div key={inv.id} className="py-4">
+              <div key={inv.id} className={"py-4 " + (stopped ? "opacity-60" : "")}>
                 <div className="flex items-baseline justify-between mb-1.5 gap-4">
                   <div className="min-w-0">
                     <div className="text-sm font-medium">{inv.name}</div>
-                    <div className="text-xs text-muted-foreground">{inv.goal || "Unassigned"}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {inv.goal || "Unassigned"}{stopped ? " · SIP ended" : ""}
+                    </div>
                   </div>
                   <div className="text-right shrink-0">
                     <div className="text-sm tabular-nums font-medium">
