@@ -199,13 +199,14 @@ function Dashboard() {
           <Level1
             rows={[
               { key: "regular", label: "Regular Expenses", sub: "HDFC→CUB spending allocation", actual: actualRegular, planned: plannedRegular, drill: true },
-              { key: "sip", label: "SIP Investments", sub: `${investments.length} SIP${investments.length === 1 ? "" : "s"} from HDFC`, actual: actualSIP, planned: plannedSIP, drill: investments.length > 0 },
+              { key: "sip", label: "SIP Investments", sub: `${activeInvestments.length} active SIP${activeInvestments.length === 1 ? "" : "s"} from HDFC`, actual: actualSIP, planned: plannedSIP, drill: investments.length > 0 },
               { key: "funds", label: "Fund Contributions", sub: "Corpus + Trip (held inside SBI)", actual: actualFunds, planned: plannedFundsTotal, drill: true },
-              { key: "fixed", label: "Fixed Commitments", sub: "Car EMI + Maintenance", actual: actualFixed, planned: plannedFixed, drill: true },
+              { key: "fixed", label: "Fixed Commitments", sub: maintenanceDue ? "Car EMI + Flat Maintenance (due)" : "Car EMI · Flat Maintenance not due", actual: actualFixed, planned: plannedFixed, drill: true },
               { key: "tax", label: "Tax Reserve", sub: "Monthly accrual inside SBI", actual: actualTax, planned: plannedTax, drill: false },
             ]}
             onDrill={(key) => go({ name: "l2", bucket: key as "regular" | "sip" | "funds" | "fixed" })}
             unallocated={unallocated}
+            plannedUnallocated={plannedUnallocated}
             remainderMissing={remainderMissing}
           />
         ) : level.name === "l2" && level.bucket === "regular" ? (
@@ -236,6 +237,8 @@ function Dashboard() {
           <Level2Fixed
             carEmi={{ actual: carEmiCat ? spentByCategory[carEmiCat.id] ?? 0 : 0, planned: plannedCarEmi }}
             maintenance={{ actual: maintenanceCat ? spentByCategory[maintenanceCat.id] ?? 0 : 0, planned: plannedMaintenance }}
+            maintenanceDue={maintenanceDue}
+            nextMaintenanceMonth={nextMaintenanceMonth}
             onBack={() => go({ name: "l1" })}
           />
         ) : level.name === "l3" ? (
