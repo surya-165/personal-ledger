@@ -48,7 +48,7 @@ function Dashboard() {
     queryFn: async () => {
       const [plan, investments, recurring] = await Promise.all([
         supabase.from("budget_plan").select("*").maybeSingle(),
-        supabase.from("investments").select("id,name,goal,monthly_amount"),
+        supabase.from("investments").select("id,name,goal,monthly_amount,active"),
         supabase.from("recurring_templates").select("name,amount"),
       ]);
       const err = plan.error ?? investments.error ?? recurring.error;
@@ -99,14 +99,24 @@ function Dashboard() {
     return m;
   }, [monthTx]);
 
-  // Split categories: Car EMI / Maintenance are Fixed Commitments; everything else is Regular.
+  // Split categories: only Car EMI and Flat Maintenance are Fixed Commitments.
+  // "Car Maintenance" stays a Regular Expense category.
   const isFixedCat = (name: string) => {
-    const n = name.toLowerCase();
-    return n.includes("car emi") || n === "maintenance" || n.includes("maintenance");
+    const n = name.trim().toLowerCase();
+    return n === "car emi" || n === "maintenance" || n === "flat maintenance";
   };
-  const carEmiCat = categories.find((c) => c.name.toLowerCase().includes("car emi"));
-  const maintenanceCat = categories.find((c) => c.name.toLowerCase().includes("maintenance"));
+  const carEmiCat = categories.find((c) => c.name.trim().toLowerCase() === "car emi");
+  const maintenanceCat = categories.find((c) => {
+    const n = c.name.trim().toLowerCase();
+    return n === "flat maintenance" || n === "maintenance";
+  });
   const regularCategories = categories.filter((c) => !isFixedCat(c.name));
+  const maintenanceDueMonths = [1, 4, 7, 10];
+  const maintenanceDue = maintenanceDueMonths.includes(month);
+  const nextMaintenanceMonth = (() => {
+    const next = maintenanceDueMonths.find((m) => m > month) ?? maintenanceDueMonths[0];
+    return new Date(2000, next - 1, 1).toLocaleDateString("en-IN", { month: "long" });
+  })();
 
   if (loading || !session) return <div className="text-sm text-muted-foreground">Loading…</div>;
   if (dataQuery.isLoading || !data || planQuery.isLoading || !planData) {
@@ -116,12 +126,14 @@ function Dashboard() {
   // Planned figures — ALL from Setup
   const plannedIncome = Number(planData.plan?.planned_monthly_income ?? 0);
   const plannedRegular = Number(planData.recurring["HDFC→CUB"] ?? 0);
-  const plannedSIP = investments.reduce((s, i) => s + Number(i.monthly_amount ?? 0), 0);
+  const activeInvestments = investments.filter((i) => (i as { active?: boolean }).active !== false);
+  const plannedSIP = activeInvestments.reduce((s, i) => s + Number(i.monthly_amount ?? 0), 0);
   const plannedFundsTotal =
     Number(planData.plan?.planned_corpus_contribution ?? 0) +
     Number(planData.plan?.planned_trip_contribution ?? 0);
   const plannedCarEmi = Number(planData.plan?.planned_car_emi ?? 0);
-  const plannedMaintenance = Number(planData.plan?.planned_maintenance ?? 0);
+  const plannedMaintenanceRaw = Number(planData.plan?.planned_maintenance ?? 0);
+  const plannedMaintenance = maintenanceDue ? plannedMaintenanceRaw : 0;
   const plannedFixed = plannedCarEmi + plannedMaintenance;
   const plannedTax = Number(planData.plan?.planned_tax_reserve ?? 0);
 
@@ -145,6 +157,8 @@ function Dashboard() {
   const actualSIP = Object.values(actualSIPByInvestment).reduce((s, n) => s + n, 0);
 
   const totalAllocated = actualRegular + actualSIP + actualFunds + actualFixed + actualTax;
+  const totalPlannedBuckets = plannedRegular + plannedSIP + plannedFundsTotal + plannedFixed + plannedTax;
+  const plannedUnallocated = plannedIncome - totalPlannedBuckets;
   const unallocated = plannedIncome - totalAllocated;
   const remainderMissing = Math.abs(unallocated) > 0.5;
 
@@ -185,13 +199,14 @@ function Dashboard() {
           <Level1
             rows={[
               { key: "regular", label: "Regular Expenses", sub: "HDFC→CUB spending allocation", actual: actualRegular, planned: plannedRegular, drill: true },
-              { key: "sip", label: "SIP Investments", sub: `${investments.length} SIP${investments.length === 1 ? "" : "s"} from HDFC`, actual: actualSIP, planned: plannedSIP, drill: investments.length > 0 },
+              { key: "sip", label: "SIP Investments", sub: `${activeInvestments.length} active SIP${activeInvestments.length === 1 ? "" : "s"} from HDFC`, actual: actualSIP, planned: plannedSIP, drill: investments.length > 0 },
               { key: "funds", label: "Fund Contributions", sub: "Corpus + Trip (held inside SBI)", actual: actualFunds, planned: plannedFundsTotal, drill: true },
-              { key: "fixed", label: "Fixed Commitments", sub: "Car EMI + Maintenance", actual: actualFixed, planned: plannedFixed, drill: true },
+              { key: "fixed", label: "Fixed Commitments", sub: maintenanceDue ? "Car EMI + Flat Maintenance (due)" : "Car EMI · Flat Maintenance not due", actual: actualFixed, planned: plannedFixed, drill: true },
               { key: "tax", label: "Tax Reserve", sub: "Monthly accrual inside SBI", actual: actualTax, planned: plannedTax, drill: false },
             ]}
             onDrill={(key) => go({ name: "l2", bucket: key as "regular" | "sip" | "funds" | "fixed" })}
             unallocated={unallocated}
+            plannedUnallocated={plannedUnallocated}
             remainderMissing={remainderMissing}
           />
         ) : level.name === "l2" && level.bucket === "regular" ? (
@@ -222,6 +237,8 @@ function Dashboard() {
           <Level2Fixed
             carEmi={{ actual: carEmiCat ? spentByCategory[carEmiCat.id] ?? 0 : 0, planned: plannedCarEmi }}
             maintenance={{ actual: maintenanceCat ? spentByCategory[maintenanceCat.id] ?? 0 : 0, planned: plannedMaintenance }}
+            maintenanceDue={maintenanceDue}
+            nextMaintenanceMonth={nextMaintenanceMonth}
             onBack={() => go({ name: "l1" })}
           />
         ) : level.name === "l3" ? (
@@ -252,11 +269,13 @@ function Level1({
   rows,
   onDrill,
   unallocated,
+  plannedUnallocated,
   remainderMissing,
 }: {
   rows: BucketRow[];
   onDrill: (key: string) => void;
   unallocated: number;
+  plannedUnallocated: number;
   remainderMissing: boolean;
 }) {
   return (
@@ -268,7 +287,7 @@ function Level1({
         {rows.map((r) => (
           <BucketBar key={r.key} row={r} onClick={r.drill ? () => onDrill(r.key) : undefined} />
         ))}
-        <UnallocatedRow amount={unallocated} highlight={remainderMissing} />
+        <UnallocatedRow amount={unallocated} planned={plannedUnallocated} highlight={remainderMissing} />
       </CardContent>
     </Card>
   );
@@ -308,7 +327,7 @@ function BucketBar({ row, onClick }: { row: BucketRow; onClick?: () => void }) {
   );
 }
 
-function UnallocatedRow({ amount, highlight }: { amount: number; highlight: boolean }) {
+function UnallocatedRow({ amount, planned, highlight }: { amount: number; planned: number; highlight: boolean }) {
   return (
     <div className={"py-4 flex items-center justify-between -mx-6 px-6 " + (highlight ? "bg-destructive/5" : "")}>
       <div className="flex items-center gap-2">
@@ -316,7 +335,7 @@ function UnallocatedRow({ amount, highlight }: { amount: number; highlight: bool
         <div>
           <div className={"text-sm font-semibold " + (highlight ? "text-destructive" : "")}>Unallocated</div>
           <div className="text-xs text-muted-foreground">
-            {highlight ? "Reconcile before month end" : "Every planned rupee is accounted for"}
+            Planned unallocated {formatINR(planned)} · {highlight ? "reconcile before month end" : "every planned rupee is accounted for"}
           </div>
         </div>
       </div>
@@ -392,7 +411,7 @@ function Level2Regular({
 function Level2SIP({
   investments, actualByInvestment, plannedSIP, actualSIP, onBack,
 }: {
-  investments: Array<{ id: string; name: string; goal: string; monthly_amount: number }>;
+  investments: Array<{ id: string; name: string; goal: string; monthly_amount: number; active?: boolean }>;
   actualByInvestment: Record<string, number>;
   plannedSIP: number;
   actualSIP: number;
@@ -406,16 +425,21 @@ function Level2SIP({
         <CardContent className="pt-4 divide-y divide-border">
           {investments.length === 0 ? (
             <div className="py-6 text-sm text-muted-foreground">No SIPs yet — add them in Setup.</div>
-          ) : investments.map((inv) => {
+          ) : [...investments]
+              .sort((a, b) => Number(b.active !== false) - Number(a.active !== false))
+              .map((inv) => {
+            const stopped = inv.active === false;
             const actual = actualByInvestment[inv.id] ?? 0;
-            const planned = Number(inv.monthly_amount) || 0;
+            const planned = stopped ? 0 : Number(inv.monthly_amount) || 0;
             const tone = statusTone(actual, planned);
             return (
-              <div key={inv.id} className="py-4">
+              <div key={inv.id} className={"py-4 " + (stopped ? "opacity-60" : "")}>
                 <div className="flex items-baseline justify-between mb-1.5 gap-4">
                   <div className="min-w-0">
                     <div className="text-sm font-medium">{inv.name}</div>
-                    <div className="text-xs text-muted-foreground">{inv.goal || "Unassigned"}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {inv.goal || "Unassigned"}{stopped ? " · SIP ended" : ""}
+                    </div>
                   </div>
                   <div className="text-right shrink-0">
                     <div className="text-sm tabular-nums font-medium">
@@ -476,17 +500,26 @@ function Level2Funds({
 }
 
 function Level2Fixed({
-  carEmi, maintenance, onBack,
+  carEmi, maintenance, maintenanceDue, nextMaintenanceMonth, onBack,
 }: {
   carEmi: { actual: number; planned: number };
   maintenance: { actual: number; planned: number };
+  maintenanceDue: boolean;
+  nextMaintenanceMonth: string;
   onBack: () => void;
 }) {
   const totalActual = carEmi.actual + maintenance.actual;
   const totalPlanned = carEmi.planned + maintenance.planned;
   const rows = [
-    { label: "Car EMI", ...carEmi },
-    { label: "Maintenance", ...maintenance },
+    { label: "Car EMI", sub: "Monthly — debited from SBI", muted: false, ...carEmi },
+    {
+      label: "Flat Maintenance",
+      sub: maintenanceDue
+        ? "Quarterly — due this month"
+        : `Not due this month · Next due: ${nextMaintenanceMonth}`,
+      muted: !maintenanceDue,
+      ...maintenance,
+    },
   ];
   return (
     <div>
@@ -497,9 +530,12 @@ function Level2Fixed({
           {rows.map((r) => {
             const tone = statusTone(r.actual, r.planned);
             return (
-              <div key={r.label} className="py-4">
+              <div key={r.label} className={"py-4 " + (r.muted ? "opacity-60" : "")}>
                 <div className="flex items-baseline justify-between mb-1.5 gap-4">
-                  <div className="text-sm font-medium">{r.label}</div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{r.label}</div>
+                    <div className="text-xs text-muted-foreground">{r.sub}</div>
+                  </div>
                   <div className="text-right shrink-0">
                     <div className="text-sm tabular-nums font-medium">
                       {formatINR(r.actual)} <span className="text-muted-foreground font-normal">/ {formatINR(r.planned)}</span>

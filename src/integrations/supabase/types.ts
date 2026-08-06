@@ -52,6 +52,7 @@ export type Database = {
       }
       budget_plan: {
         Row: {
+          annual_tax_estimate: number
           created_at: string
           id: string
           planned_car_emi: number
@@ -64,6 +65,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          annual_tax_estimate?: number
           created_at?: string
           id?: string
           planned_car_emi?: number
@@ -76,6 +78,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          annual_tax_estimate?: number
           created_at?: string
           id?: string
           planned_car_emi?: number
@@ -308,6 +311,7 @@ export type Database = {
           goal: string
           id: string
           invested_total: number
+          kite_symbol: string | null
           monthly_amount: number
           name: string
           source_account_id: string | null
@@ -320,6 +324,7 @@ export type Database = {
           goal: string
           id?: string
           invested_total?: number
+          kite_symbol?: string | null
           monthly_amount?: number
           name: string
           source_account_id?: string | null
@@ -332,6 +337,7 @@ export type Database = {
           goal?: string
           id?: string
           invested_total?: number
+          kite_symbol?: string | null
           monthly_amount?: number
           name?: string
           source_account_id?: string | null
