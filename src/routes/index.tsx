@@ -48,7 +48,7 @@ function Dashboard() {
     queryFn: async () => {
       const [plan, investments, recurring] = await Promise.all([
         supabase.from("budget_plan").select("*").maybeSingle(),
-        supabase.from("investments").select("id,name,goal,monthly_amount"),
+        supabase.from("investments").select("id,name,goal,monthly_amount,active"),
         supabase.from("recurring_templates").select("name,amount"),
       ]);
       const err = plan.error ?? investments.error ?? recurring.error;
