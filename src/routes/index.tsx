@@ -269,11 +269,13 @@ function Level1({
   rows,
   onDrill,
   unallocated,
+  plannedUnallocated,
   remainderMissing,
 }: {
   rows: BucketRow[];
   onDrill: (key: string) => void;
   unallocated: number;
+  plannedUnallocated: number;
   remainderMissing: boolean;
 }) {
   return (
@@ -285,7 +287,7 @@ function Level1({
         {rows.map((r) => (
           <BucketBar key={r.key} row={r} onClick={r.drill ? () => onDrill(r.key) : undefined} />
         ))}
-        <UnallocatedRow amount={unallocated} highlight={remainderMissing} />
+        <UnallocatedRow amount={unallocated} planned={plannedUnallocated} highlight={remainderMissing} />
       </CardContent>
     </Card>
   );
@@ -325,7 +327,7 @@ function BucketBar({ row, onClick }: { row: BucketRow; onClick?: () => void }) {
   );
 }
 
-function UnallocatedRow({ amount, highlight }: { amount: number; highlight: boolean }) {
+function UnallocatedRow({ amount, planned, highlight }: { amount: number; planned: number; highlight: boolean }) {
   return (
     <div className={"py-4 flex items-center justify-between -mx-6 px-6 " + (highlight ? "bg-destructive/5" : "")}>
       <div className="flex items-center gap-2">
@@ -333,7 +335,7 @@ function UnallocatedRow({ amount, highlight }: { amount: number; highlight: bool
         <div>
           <div className={"text-sm font-semibold " + (highlight ? "text-destructive" : "")}>Unallocated</div>
           <div className="text-xs text-muted-foreground">
-            {highlight ? "Reconcile before month end" : "Every planned rupee is accounted for"}
+            Planned unallocated {formatINR(planned)} · {highlight ? "reconcile before month end" : "every planned rupee is accounted for"}
           </div>
         </div>
       </div>
@@ -493,17 +495,26 @@ function Level2Funds({
 }
 
 function Level2Fixed({
-  carEmi, maintenance, onBack,
+  carEmi, maintenance, maintenanceDue, nextMaintenanceMonth, onBack,
 }: {
   carEmi: { actual: number; planned: number };
   maintenance: { actual: number; planned: number };
+  maintenanceDue: boolean;
+  nextMaintenanceMonth: string;
   onBack: () => void;
 }) {
   const totalActual = carEmi.actual + maintenance.actual;
   const totalPlanned = carEmi.planned + maintenance.planned;
   const rows = [
-    { label: "Car EMI", ...carEmi },
-    { label: "Maintenance", ...maintenance },
+    { label: "Car EMI", sub: "Monthly — debited from SBI", muted: false, ...carEmi },
+    {
+      label: "Flat Maintenance",
+      sub: maintenanceDue
+        ? "Quarterly — due this month"
+        : `Not due this month · Next due: ${nextMaintenanceMonth}`,
+      muted: !maintenanceDue,
+      ...maintenance,
+    },
   ];
   return (
     <div>
@@ -514,9 +525,12 @@ function Level2Fixed({
           {rows.map((r) => {
             const tone = statusTone(r.actual, r.planned);
             return (
-              <div key={r.label} className="py-4">
+              <div key={r.label} className={"py-4 " + (r.muted ? "opacity-60" : "")}>
                 <div className="flex items-baseline justify-between mb-1.5 gap-4">
-                  <div className="text-sm font-medium">{r.label}</div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{r.label}</div>
+                    <div className="text-xs text-muted-foreground">{r.sub}</div>
+                  </div>
                   <div className="text-right shrink-0">
                     <div className="text-sm tabular-nums font-medium">
                       {formatINR(r.actual)} <span className="text-muted-foreground font-normal">/ {formatINR(r.planned)}</span>
