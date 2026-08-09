@@ -166,6 +166,80 @@ export type Database = {
           },
         ]
       }
+      goal_mappings: {
+        Row: {
+          created_at: string
+          equity_allocation_percent: number | null
+          goal_id: string
+          id: string
+          kite_tradingsymbol: string | null
+          mapping_type: Database["public"]["Enums"]["goal_mapping_type"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          equity_allocation_percent?: number | null
+          goal_id: string
+          id?: string
+          kite_tradingsymbol?: string | null
+          mapping_type: Database["public"]["Enums"]["goal_mapping_type"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          equity_allocation_percent?: number | null
+          goal_id?: string
+          id?: string
+          kite_tradingsymbol?: string | null
+          mapping_type?: Database["public"]["Enums"]["goal_mapping_type"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "goal_mappings_goal_id_fkey"
+            columns: ["goal_id"]
+            isOneToOne: false
+            referencedRelation: "goals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      goals: {
+        Row: {
+          created_at: string
+          expected_return_percent: number
+          id: string
+          name: string
+          target_amount: number
+          time_frame_months: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          expected_return_percent?: number
+          id?: string
+          name: string
+          target_amount?: number
+          time_frame_months?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          expected_return_percent?: number
+          id?: string
+          name?: string
+          target_amount?: number
+          time_frame_months?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       income_split_components: {
         Row: {
           account_id: string | null
@@ -353,6 +427,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      kite_tokens: {
+        Row: {
+          access_token: string
+          created_at: string
+          kite_user_id: string | null
+          public_token: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          access_token: string
+          created_at?: string
+          kite_user_id?: string | null
+          public_token?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          access_token?: string
+          created_at?: string
+          kite_user_id?: string | null
+          public_token?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       loans: {
         Row: {
@@ -663,6 +764,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
+      goal_mapping_type: "mf_holding" | "equity"
       loan_status: "active" | "settled"
       loan_type: "external" | "internal"
       reserve_kind: "floor" | "accrual"
@@ -808,6 +910,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      goal_mapping_type: ["mf_holding", "equity"],
       loan_status: ["active", "settled"],
       loan_type: ["external", "internal"],
       reserve_kind: ["floor", "accrual"],
