@@ -130,7 +130,9 @@ function RootComponent() {
     if (didRedirect.current) return;
     didRedirect.current = true;
     const path = window.location.pathname;
-    if (path !== "/" && path !== "/auth" && !path.startsWith("/api")) {
+    const search = window.location.search;
+    const isKiteCallback = search.includes("kite_request_token") || search.includes("kite_error");
+    if (path !== "/" && path !== "/auth" && !path.startsWith("/api") && !isKiteCallback) {
       router.navigate({ to: "/", replace: true });
     }
   }, [router]);
