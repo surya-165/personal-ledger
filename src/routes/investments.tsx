@@ -512,12 +512,22 @@ function DashboardTab({
 
   if (!connected) {
     return (
-      <Card>
-        <CardContent className="py-12 text-center space-y-4">
-          <p className="text-sm text-muted-foreground">Connect Zerodha to see your investment dashboard.</p>
-          <Button onClick={onConnect}><Link2 className="h-4 w-4 mr-1" /> Connect Zerodha</Button>
-        </CardContent>
-      </Card>
+      <div>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/40 px-4 py-2.5 mb-6">
+          <span className="text-sm text-muted-foreground">Zerodha not connected</span>
+          <Button size="sm" onClick={onConnect}>
+            <Link2 className="h-4 w-4 mr-1" /> Connect Zerodha
+          </Button>
+        </div>
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-sm text-muted-foreground">
+              Connect Zerodha to see your investment dashboard. Once connected, set up your goals in the
+              Setup tab.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
