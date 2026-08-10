@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { exchangeKiteToken } from "@/lib/kite.functions";
 
-export const Route = createFileRoute("/api/public/zerodha/callback")({
+export const Route = createFileRoute("/zerodha-callback")({
   component: ZerodhaCallback,
 });
 

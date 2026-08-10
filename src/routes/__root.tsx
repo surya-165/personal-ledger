@@ -131,7 +131,10 @@ function RootComponent() {
     didRedirect.current = true;
     const path = window.location.pathname;
     const search = window.location.search;
-    const isKiteCallback = search.includes("kite_request_token") || search.includes("kite_error");
+    const isKiteCallback =
+      path === "/zerodha-callback" ||
+      search.includes("kite_request_token") ||
+      search.includes("kite_error");
     if (path !== "/" && path !== "/auth" && !path.startsWith("/api") && !isKiteCallback) {
       router.navigate({ to: "/", replace: true });
     }

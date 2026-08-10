@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ZerodhaCallbackRouteImport } from './routes/zerodha-callback'
 import { Route as TransactionsRouteImport } from './routes/transactions'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as LoansRouteImport } from './routes/loans'
@@ -18,8 +19,12 @@ import { Route as BudgetsRouteImport } from './routes/budgets'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApiPublicZerodhaCallbackRouteImport } from './routes/api/public/zerodha/callback'
 
+const ZerodhaCallbackRoute = ZerodhaCallbackRouteImport.update({
+  id: '/zerodha-callback',
+  path: '/zerodha-callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TransactionsRoute = TransactionsRouteImport.update({
   id: '/transactions',
   path: '/transactions',
@@ -65,12 +70,6 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPublicZerodhaCallbackRoute =
-  ApiPublicZerodhaCallbackRouteImport.update({
-    id: '/api/public/zerodha/callback',
-    path: '/api/public/zerodha/callback',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -82,7 +81,7 @@ export interface FileRoutesByFullPath {
   '/loans': typeof LoansRoute
   '/setup': typeof SetupRoute
   '/transactions': typeof TransactionsRoute
-  '/api/public/zerodha/callback': typeof ApiPublicZerodhaCallbackRoute
+  '/zerodha-callback': typeof ZerodhaCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -94,7 +93,7 @@ export interface FileRoutesByTo {
   '/loans': typeof LoansRoute
   '/setup': typeof SetupRoute
   '/transactions': typeof TransactionsRoute
-  '/api/public/zerodha/callback': typeof ApiPublicZerodhaCallbackRoute
+  '/zerodha-callback': typeof ZerodhaCallbackRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -107,7 +106,7 @@ export interface FileRoutesById {
   '/loans': typeof LoansRoute
   '/setup': typeof SetupRoute
   '/transactions': typeof TransactionsRoute
-  '/api/public/zerodha/callback': typeof ApiPublicZerodhaCallbackRoute
+  '/zerodha-callback': typeof ZerodhaCallbackRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -121,7 +120,7 @@ export interface FileRouteTypes {
     | '/loans'
     | '/setup'
     | '/transactions'
-    | '/api/public/zerodha/callback'
+    | '/zerodha-callback'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -133,7 +132,7 @@ export interface FileRouteTypes {
     | '/loans'
     | '/setup'
     | '/transactions'
-    | '/api/public/zerodha/callback'
+    | '/zerodha-callback'
   id:
     | '__root__'
     | '/'
@@ -145,7 +144,7 @@ export interface FileRouteTypes {
     | '/loans'
     | '/setup'
     | '/transactions'
-    | '/api/public/zerodha/callback'
+    | '/zerodha-callback'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -158,11 +157,18 @@ export interface RootRouteChildren {
   LoansRoute: typeof LoansRoute
   SetupRoute: typeof SetupRoute
   TransactionsRoute: typeof TransactionsRoute
-  ApiPublicZerodhaCallbackRoute: typeof ApiPublicZerodhaCallbackRoute
+  ZerodhaCallbackRoute: typeof ZerodhaCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/zerodha-callback': {
+      id: '/zerodha-callback'
+      path: '/zerodha-callback'
+      fullPath: '/zerodha-callback'
+      preLoaderRoute: typeof ZerodhaCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/transactions': {
       id: '/transactions'
       path: '/transactions'
@@ -226,13 +232,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/zerodha/callback': {
-      id: '/api/public/zerodha/callback'
-      path: '/api/public/zerodha/callback'
-      fullPath: '/api/public/zerodha/callback'
-      preLoaderRoute: typeof ApiPublicZerodhaCallbackRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
@@ -246,7 +245,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoansRoute: LoansRoute,
   SetupRoute: SetupRoute,
   TransactionsRoute: TransactionsRoute,
-  ApiPublicZerodhaCallbackRoute: ApiPublicZerodhaCallbackRoute,
+  ZerodhaCallbackRoute: ZerodhaCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
