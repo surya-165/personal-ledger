@@ -29,9 +29,9 @@ function ZerodhaCallback() {
       return;
     }
 
-    supabase.auth
-      .getSession()
-      .then(async ({ data }) => {
+    void (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
         if (!data.session) {
           setState("nosession");
           setMessage(
@@ -40,18 +40,14 @@ function ZerodhaCallback() {
           return;
         }
         await exchangeKiteToken({ data: { request_token: requestToken } });
-      })
-      .then(() => {
-        if (started.current === false) return;
-        setState((s) => (s === "nosession" ? s : "success"));
         setState("success");
         setMessage("Zerodha connected successfully");
         setTimeout(() => router.navigate({ to: "/investments", replace: true }), 2000);
-      })
-      .catch((e: unknown) => {
+      } catch (e: unknown) {
         setState("error");
         setMessage(e instanceof Error ? e.message : "Could not connect to Zerodha.");
-      });
+      }
+    })();
   }, [router]);
 
   return (
