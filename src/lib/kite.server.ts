@@ -7,9 +7,8 @@ export function getKiteApiKey(): string {
 }
 
 export function getKiteSecret(): string {
-  // Secret is stored under KITE_SECRET_KEY; older projects used KITE_API_SECRET.
-  const secret = process.env["KITE_SECRET_KEY"] ?? process.env["KITE_API_SECRET"];
-  if (!secret) throw new Error("KITE_SECRET_KEY is not configured");
+  const secret = process.env["KITE_API_SECRET"];
+  if (!secret) throw new Error("KITE_API_SECRET is not configured");
   return secret;
 }
 
