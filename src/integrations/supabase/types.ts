@@ -94,6 +94,7 @@ export type Database = {
       }
       categories: {
         Row: {
+          bucket: string
           created_at: string
           id: string
           monthly_limit: number
@@ -103,6 +104,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          bucket?: string
           created_at?: string
           id?: string
           monthly_limit?: number
@@ -112,6 +114,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          bucket?: string
           created_at?: string
           id?: string
           monthly_limit?: number
@@ -663,6 +666,7 @@ export type Database = {
         Row: {
           account_id: string
           amount: number
+          bucket: string | null
           category_id: string | null
           created_at: string
           date: string
@@ -680,6 +684,7 @@ export type Database = {
         Insert: {
           account_id: string
           amount: number
+          bucket?: string | null
           category_id?: string | null
           created_at?: string
           date: string
@@ -697,6 +702,7 @@ export type Database = {
         Update: {
           account_id?: string
           amount?: number
+          bucket?: string | null
           category_id?: string | null
           created_at?: string
           date?: string
