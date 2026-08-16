@@ -677,6 +677,7 @@ export type Database = {
           loan_id: string | null
           payment_mode: string | null
           reserve_id: string | null
+          sub_category: string | null
           type: Database["public"]["Enums"]["transaction_type"]
           updated_at: string
           user_id: string
@@ -695,6 +696,7 @@ export type Database = {
           loan_id?: string | null
           payment_mode?: string | null
           reserve_id?: string | null
+          sub_category?: string | null
           type: Database["public"]["Enums"]["transaction_type"]
           updated_at?: string
           user_id: string
@@ -713,6 +715,7 @@ export type Database = {
           loan_id?: string | null
           payment_mode?: string | null
           reserve_id?: string | null
+          sub_category?: string | null
           type?: Database["public"]["Enums"]["transaction_type"]
           updated_at?: string
           user_id?: string
