@@ -14,3 +14,8 @@ Planned monthly income is always a user-editable input (budget_plan.planned_mont
 Category naming: "Car EMI" and "Flat Maintenance"/"Maintenance" belong to Fixed Commitments only. "Car Maintenance" is a Regular Expense category.
 Internal transfers (HDFC→CUB, HDFC→SBI) never appear as waterfall rows.
 Setup save aborts if a previously non-zero value would be overwritten with 0.
+Two-level category system (Level 1 bucket + Level 2 sub-category):
+- categories.bucket holds the Level 1 name; transactions store both `bucket` and `sub_category`.
+- Level 2 sources: Regular Expenses + Fixed Commitments → categories rows (both dynamic, user can add/delete in Setup); SIP Investments → investments rows; Fund Contributions → Corpus/Trip funds (fixed); Tax Reserve → single "Tax Reserve" item.
+- Bucket implies the transaction type: Regular/SIP/Fixed → expense, Fund Contributions → fund_contribution, Tax Reserve → reserve_accrual. Non-spending types (income, transfer, loans, fund_withdrawal) have bucket = null.
+- Dashboard Level 1 totals group on transactions.bucket, never inferred from type.
