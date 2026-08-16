@@ -191,6 +191,8 @@ interface PreviewRow {
   reserve_id?: string | null;
   description: string;
   label: string;
+  bucket?: string | null;
+  sub_category?: string | null;
 }
 
 function todayISO() {
@@ -267,11 +269,13 @@ function ConfirmDialog({
       type: "reserve_accrual", amount: t, account_id: taxReserve.account_id, reserve_id: taxReserve.id,
       description: "Tax reserve set aside",
       label: "Tax reserve earmark",
+      bucket: "Tax Reserve", sub_category: "Tax Reserve",
     });
     if (emiCat) out.push({
       type: "expense", amount: e, account_id: sbi.id, category_id: emiCat.id,
       description: "Car EMI",
       label: "Car EMI",
+      bucket: "Fixed Commitments", sub_category: "Car EMI",
     });
     // Residual cash in SBI available for funds (tax reserve is earmarked)
     const residual = amt - t - e;
@@ -286,11 +290,13 @@ function ConfirmDialog({
       type: "fund_contribution", amount: c, account_id: sbi.id, fund_id: corpus.id,
       description: "Corpus Fund contribution",
       label: "Corpus Fund contribution",
+      bucket: "Fund Contributions", sub_category: corpus.name,
     });
     if (tr > 0 && trip) out.push({
       type: "fund_contribution", amount: tr, account_id: sbi.id, fund_id: trip.id,
       description: "Trip Fund contribution",
       label: "Trip Fund contribution",
+      bucket: "Fund Contributions", sub_category: trip.name,
     });
     return out;
   }, [templateId, amt, e, t, c, tr, hdfc, cub, sbi, corpus, trip, emiCat, taxReserve]);
@@ -316,6 +322,8 @@ function ConfirmDialog({
       reserve_id: r.reserve_id ?? null,
       description: r.description,
       payment_mode: null,
+      bucket: r.bucket ?? null,
+      sub_category: r.sub_category ?? null,
     }));
     const { error } = await supabase.from("transactions").insert(payload as never);
     setBusy(false);
@@ -339,6 +347,8 @@ function ConfirmDialog({
       reserve_id: r.reserve_id ?? null,
       description: r.description,
       payment_mode: null,
+      bucket: r.bucket ?? null,
+      sub_category: r.sub_category ?? null,
     };
   }
 
