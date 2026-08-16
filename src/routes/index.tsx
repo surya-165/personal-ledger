@@ -99,6 +99,17 @@ function Dashboard() {
     return m;
   }, [monthTx]);
 
+  // Bucket totals read the `bucket` column on transactions.
+  const bucketTotals = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const t of monthTx) {
+      const b = t.bucket;
+      if (!b) continue;
+      m[b] = (m[b] ?? 0) + Number(t.amount);
+    }
+    return m;
+  }, [monthTx]);
+
   // Split categories: only Car EMI and Flat Maintenance are Fixed Commitments.
   // "Car Maintenance" stays a Regular Expense category.
   const isFixedCat = (name: string) => {
@@ -110,7 +121,12 @@ function Dashboard() {
     const n = c.name.trim().toLowerCase();
     return n === "flat maintenance" || n === "maintenance";
   });
-  const regularCategories = categories.filter((c) => !isFixedCat(c.name));
+  const regularCategories = categories.filter(
+    (c) => (c.bucket ? c.bucket === "Regular Expenses" : !isFixedCat(c.name)) && !isFixedCat(c.name),
+  );
+  const extraFixedCategories = categories.filter(
+    (c) => c.bucket === "Fixed Commitments" && !isFixedCat(c.name),
+  );
   const maintenanceDueMonths = [1, 4, 7, 10];
   const maintenanceDue = maintenanceDueMonths.includes(month);
   const nextMaintenanceMonth = (() => {
@@ -134,27 +150,29 @@ function Dashboard() {
   const plannedCarEmi = Number(planData.plan?.planned_car_emi ?? 0);
   const plannedMaintenanceRaw = Number(planData.plan?.planned_maintenance ?? 0);
   const plannedMaintenance = maintenanceDue ? plannedMaintenanceRaw : 0;
-  const plannedFixed = plannedCarEmi + plannedMaintenance;
+  const plannedExtraFixed = extraFixedCategories.reduce((s, c) => s + Number(c.monthly_limit ?? 0), 0);
+  const plannedFixed = plannedCarEmi + plannedMaintenance + plannedExtraFixed;
   const plannedTax = Number(planData.plan?.planned_tax_reserve ?? 0);
 
-  // Actuals this month
-  const actualRegular = regularCategories.reduce((s, c) => s + (spentByCategory[c.id] ?? 0), 0);
-  const actualFixed =
-    (carEmiCat ? spentByCategory[carEmiCat.id] ?? 0 : 0) +
-    (maintenanceCat ? spentByCategory[maintenanceCat.id] ?? 0 : 0);
-  const actualFunds = funds.reduce((s, f) => s + (contribByFund[f.id] ?? 0), 0);
-  const actualTax = monthTx
-    .filter((t) => t.type === "reserve_accrual")
-    .reduce((s, t) => s + Number(t.amount), 0);
-  // SIP actuals: match expense/transfer transactions whose description contains an investment name.
+  // Actuals this month — grouped by the transaction's bucket column
+  const actualRegular = bucketTotals["Regular Expenses"] ?? 0;
+  const actualFixed = bucketTotals["Fixed Commitments"] ?? 0;
+  const actualFunds = bucketTotals["Fund Contributions"] ?? 0;
+  const actualTax = bucketTotals["Tax Reserve"] ?? 0;
+  const actualSIP = bucketTotals["SIP Investments"] ?? 0;
+  // SIP actuals per fund — matched on the Level 2 sub-category, falling back to
+  // the description for transactions logged before sub-categories existed.
   const actualSIPByInvestment: Record<string, number> = {};
   for (const inv of investments) {
     const needle = inv.name.toLowerCase();
     actualSIPByInvestment[inv.id] = monthTx
-      .filter((t) => (t.type === "expense" || t.type === "transfer") && (t.description ?? "").toLowerCase().includes(needle))
+      .filter((t) =>
+        t.bucket === "SIP Investments"
+          ? (t.sub_category ?? "") === inv.name
+          : (t.type === "expense" || t.type === "transfer") && (t.description ?? "").toLowerCase().includes(needle),
+      )
       .reduce((s, t) => s + Number(t.amount), 0);
   }
-  const actualSIP = Object.values(actualSIPByInvestment).reduce((s, n) => s + n, 0);
 
   const totalAllocated = actualRegular + actualSIP + actualFunds + actualFixed + actualTax;
   const totalPlannedBuckets = plannedRegular + plannedSIP + plannedFundsTotal + plannedFixed + plannedTax;
@@ -237,6 +255,11 @@ function Dashboard() {
           <Level2Fixed
             carEmi={{ actual: carEmiCat ? spentByCategory[carEmiCat.id] ?? 0 : 0, planned: plannedCarEmi }}
             maintenance={{ actual: maintenanceCat ? spentByCategory[maintenanceCat.id] ?? 0 : 0, planned: plannedMaintenance }}
+            extras={extraFixedCategories.map((c) => ({
+              label: c.name,
+              planned: Number(c.monthly_limit ?? 0),
+              actual: spentByCategory[c.id] ?? 0,
+            }))}
             maintenanceDue={maintenanceDue}
             nextMaintenanceMonth={nextMaintenanceMonth}
             onBack={() => go({ name: "l1" })}
@@ -500,16 +523,17 @@ function Level2Funds({
 }
 
 function Level2Fixed({
-  carEmi, maintenance, maintenanceDue, nextMaintenanceMonth, onBack,
+  carEmi, maintenance, extras, maintenanceDue, nextMaintenanceMonth, onBack,
 }: {
   carEmi: { actual: number; planned: number };
   maintenance: { actual: number; planned: number };
+  extras: Array<{ label: string; planned: number; actual: number }>;
   maintenanceDue: boolean;
   nextMaintenanceMonth: string;
   onBack: () => void;
 }) {
-  const totalActual = carEmi.actual + maintenance.actual;
-  const totalPlanned = carEmi.planned + maintenance.planned;
+  const totalActual = carEmi.actual + maintenance.actual + extras.reduce((s, e) => s + e.actual, 0);
+  const totalPlanned = carEmi.planned + maintenance.planned + extras.reduce((s, e) => s + e.planned, 0);
   const rows = [
     { label: "Car EMI", sub: "Monthly — debited from SBI", muted: false, ...carEmi },
     {
@@ -520,6 +544,7 @@ function Level2Fixed({
       muted: !maintenanceDue,
       ...maintenance,
     },
+    ...extras.map((e) => ({ label: e.label, sub: "Monthly commitment", muted: false, actual: e.actual, planned: e.planned })),
   ];
   return (
     <div>

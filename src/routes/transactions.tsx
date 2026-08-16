@@ -10,10 +10,15 @@ import {
   formatINR,
   txTypeLabel,
   computeAccountBalances,
+  BUCKETS,
+  bucketTxType,
+  nonSpendingTypes,
+  type Bucket,
   type TxType,
   type AccountRow,
   type CategoryRow,
   type FundRow,
+  type InvestmentRow,
   type ReserveRow,
   type TxRow,
 } from "@/lib/finance-db";
@@ -69,7 +74,8 @@ function TransactionsPage() {
   const [to, setTo] = useState(monthEndISO());
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
   const [accountFilter, setAccountFilter] = useState<string[]>([]);
-  const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
+  const [bucketFilter, setBucketFilter] = useState<string[]>([]);
+  const [subFilter, setSubFilter] = useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TxRow | null>(null);
   const [pendingDelete, setPendingDelete] = useState<TxRow | null>(null);
@@ -81,6 +87,43 @@ function TransactionsPage() {
   const categories = data?.categories ?? [];
   const funds = data?.funds ?? [];
   const reserves = data?.reserves ?? [];
+  const investments = data?.investments ?? [];
+
+  const categoryById = useMemo(
+    () => Object.fromEntries(categories.map((c) => [c.id, c])),
+    [categories],
+  );
+  const fundById = useMemo(() => Object.fromEntries(funds.map((f) => [f.id, f])), [funds]);
+
+  const subLabel = useMemo(
+    () => (t: TxRow) => {
+      if (t.sub_category) return t.sub_category;
+      if (t.category_id) return categoryById[t.category_id]?.name ?? "";
+      if (t.type === "fund_contribution" && t.fund_id) return fundById[t.fund_id]?.name ?? "";
+      if (t.type === "reserve_accrual") return "Tax Reserve";
+      return "";
+    },
+    [categoryById, fundById],
+  );
+
+  // Level 2 options, grouped by their Level 1 bucket.
+  const subsByBucket = useMemo(() => {
+    const m: Record<string, string[]> = {
+      "Regular Expenses": categories.filter((c) => c.bucket === "Regular Expenses").map((c) => c.name),
+      "SIP Investments": investments.map((i) => i.name),
+      "Fund Contributions": funds.map((f) => f.name),
+      "Fixed Commitments": categories.filter((c) => c.bucket === "Fixed Commitments").map((c) => c.name),
+      "Tax Reserve": ["Tax Reserve"],
+    };
+    return m;
+  }, [categories, investments, funds]);
+
+  const subOptions = useMemo(() => {
+    const buckets = bucketFilter.length > 0 ? bucketFilter : (BUCKETS as readonly string[]);
+    const names = new Set<string>();
+    for (const b of buckets) for (const n of subsByBucket[b] ?? []) names.add(n);
+    return [...names].map((n) => ({ value: n, label: n }));
+  }, [bucketFilter, subsByBucket]);
 
   const balances = useMemo(
     () => computeAccountBalances(accounts, transactions),
@@ -93,16 +136,17 @@ function TransactionsPage() {
       if (to && t.date > to) return false;
       if (typeFilter.length > 0 && !typeFilter.includes(t.type)) return false;
       if (accountFilter.length > 0 && !accountFilter.includes(t.account_id)) return false;
-      if (categoryFilter.length > 0 && (!t.category_id || !categoryFilter.includes(t.category_id))) return false;
+      if (bucketFilter.length > 0 && (!t.bucket || !bucketFilter.includes(t.bucket))) return false;
+      if (subFilter.length > 0 && !subFilter.includes(subLabel(t))) return false;
       return true;
     });
-  }, [transactions, from, to, typeFilter, accountFilter, categoryFilter]);
+  }, [transactions, from, to, typeFilter, accountFilter, bucketFilter, subFilter, subLabel]);
 
   const hasAnyFilter =
-    !!from || !!to || typeFilter.length > 0 || accountFilter.length > 0 || categoryFilter.length > 0;
+    !!from || !!to || typeFilter.length > 0 || accountFilter.length > 0 || bucketFilter.length > 0 || subFilter.length > 0;
   const clearAll = () => {
     setFrom(""); setTo("");
-    setTypeFilter([]); setAccountFilter([]); setCategoryFilter([]);
+    setTypeFilter([]); setAccountFilter([]); setBucketFilter([]); setSubFilter([]);
   };
 
   async function confirmDelete() {
@@ -125,7 +169,6 @@ function TransactionsPage() {
   }
 
   const accountById = Object.fromEntries(accounts.map((a) => [a.id, a]));
-  const categoryById = Object.fromEntries(categories.map((c) => [c.id, c]));
 
   return (
     <div>
@@ -141,6 +184,7 @@ function TransactionsPage() {
               categories={categories}
               funds={funds}
               reserves={reserves}
+              investments={investments}
               userId={user!.id}
               onSaved={() => {
                 setDialogOpen(false);
@@ -173,7 +217,7 @@ function TransactionsPage() {
       ) : null}
 
       <Card className="mb-5">
-        <CardContent className="pt-6 grid grid-cols-2 md:grid-cols-5 gap-3">
+        <CardContent className="pt-6 grid grid-cols-2 md:grid-cols-6 gap-3">
           <Field label="From"><DateInput value={from} onChange={setFrom} /></Field>
           <Field label="To"><DateInput value={to} onChange={setTo} /></Field>
           <Field label="Type">
@@ -192,16 +236,30 @@ function TransactionsPage() {
               options={accounts.map((a) => ({ value: a.id, label: a.name }))}
             />
           </Field>
+          <Field label="Bucket">
+            <MultiSelect
+              placeholder="All buckets"
+              value={bucketFilter}
+              onChange={(v) => {
+                setBucketFilter(v);
+                const allowed = new Set(
+                  (v.length > 0 ? v : (BUCKETS as readonly string[])).flatMap((b) => subsByBucket[b] ?? []),
+                );
+                setSubFilter((prev) => prev.filter((s) => allowed.has(s)));
+              }}
+              options={BUCKETS.map((b) => ({ value: b, label: b }))}
+            />
+          </Field>
           <Field label="Category">
             <MultiSelect
               placeholder="All categories"
-              value={categoryFilter}
-              onChange={setCategoryFilter}
-              options={categories.map((c) => ({ value: c.id, label: c.name }))}
+              value={subFilter}
+              onChange={setSubFilter}
+              options={subOptions}
             />
           </Field>
           {hasAnyFilter ? (
-            <div className="col-span-2 md:col-span-5 flex justify-end">
+            <div className="col-span-2 md:col-span-6 flex justify-end">
               <Button size="sm" variant="ghost" onClick={clearAll}>Clear all</Button>
             </div>
           ) : null}
@@ -217,6 +275,7 @@ function TransactionsPage() {
                 <th className="px-5 py-3 font-medium">Description</th>
                 <th className="px-5 py-3 font-medium">Type</th>
                 <th className="px-5 py-3 font-medium">Account</th>
+                <th className="px-5 py-3 font-medium">Bucket</th>
                 <th className="px-5 py-3 font-medium">Category</th>
                 <th className="px-5 py-3 font-medium text-right">Amount</th>
               </tr>
@@ -245,8 +304,11 @@ function TransactionsPage() {
                       </Badge>
                     </td>
                     <td className="px-5 py-3.5">{accountById[t.account_id]?.name ?? ""}</td>
+                    <td className="px-5 py-3.5 text-muted-foreground whitespace-nowrap">
+                      {t.bucket ? t.bucket : "—"}
+                    </td>
                     <td className="px-5 py-3.5 text-muted-foreground">
-                      {t.category_id ? categoryById[t.category_id]?.name : "—"}
+                      {t.bucket ? (subLabel(t) || "—") : txTypeLabel[t.type]}
                     </td>
                     <td className={
                       "px-5 py-3.5 text-right tabular-nums font-medium whitespace-nowrap " +
@@ -277,7 +339,7 @@ function TransactionsPage() {
               })}
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-muted-foreground">
+                  <td colSpan={8} className="px-5 py-10 text-center text-sm text-muted-foreground">
                     {dataQuery.isLoading ? "Loading…" : "No transactions yet. Use Add to record your first one."}
                   </td>
                 </tr>
@@ -295,6 +357,7 @@ function TransactionsPage() {
             categories={categories}
             funds={funds}
             reserves={reserves}
+            investments={investments}
             userId={user!.id}
             editing={editing}
             onSaved={() => {
@@ -449,51 +512,73 @@ function todayISO() {
 }
 
 function AddTransactionDialog({
-  accounts, categories, funds, reserves, userId, onSaved, editing,
+  accounts, categories, funds, reserves, investments, userId, onSaved, editing,
 }: {
   accounts: AccountRow[];
   categories: CategoryRow[];
   funds: FundRow[];
   reserves: ReserveRow[];
+  investments: InvestmentRow[];
   userId: string;
   onSaved: () => void;
   editing?: TxRow;
 }) {
   const cub = accounts.find((a) => a.code === "CUB");
+  const hdfc = accounts.find((a) => a.code === "HDFC");
   const sbi = accounts.find((a) => a.code === "SBI");
+  const taxReserve = reserves.find((r) => !r.name.toLowerCase().includes("floor")) ?? reserves[0];
 
-  const [type, setType] = useState<TxType>(editing?.type ?? "expense");
+  const initialBucket = (editing?.bucket as Bucket | undefined) ?? undefined;
+  const [mode, setMode] = useState<"bucket" | "other">(
+    editing ? (editing.bucket ? "bucket" : "other") : "bucket",
+  );
+  const [bucket, setBucket] = useState<Bucket | "">(initialBucket ?? "");
+  const [otherType, setOtherType] = useState<TxType>(
+    editing && !editing.bucket ? editing.type : "income",
+  );
+  const [sub, setSub] = useState<string>(editing?.sub_category ?? "");
+
   const [date, setDate] = useState(editing?.date ?? todayISO());
   const [amount, setAmount] = useState(editing ? String(editing.amount) : "");
   const [description, setDescription] = useState(editing?.description ?? "");
   const [paymentMode, setPaymentMode] = useState<string>(editing?.payment_mode ?? "");
   const [accountId, setAccountId] = useState<string>(editing?.account_id ?? cub?.id ?? accounts[0]?.id ?? "");
   const [destinationId, setDestinationId] = useState<string>(editing?.destination_account_id ?? "");
-  const [categoryId, setCategoryId] = useState<string>(editing?.category_id ?? "");
-  const [fundId, setFundId] = useState<string>(editing?.fund_id ?? "");
-  const [reserveId, setReserveId] = useState<string>(editing?.reserve_id ?? "");
   const [busy, setBusy] = useState(false);
 
-  // When the type changes, reset to sensible defaults (skip the first run when editing).
+  const type: TxType = mode === "bucket" && bucket ? bucketTxType[bucket] : otherType;
+
+  const regularCats = categories.filter((c) => c.bucket === "Regular Expenses");
+  const fixedCats = categories.filter((c) => c.bucket === "Fixed Commitments");
+
+  const subOptions: string[] =
+    bucket === "Regular Expenses" ? regularCats.map((c) => c.name)
+    : bucket === "Fixed Commitments" ? fixedCats.map((c) => c.name)
+    : bucket === "SIP Investments" ? investments.map((i) => i.name)
+    : bucket === "Fund Contributions" ? funds.map((f) => f.name)
+    : [];
+
+  // Reset dependent fields when the bucket / non-spending type changes.
   const skipReset = useRef(!!editing);
   useEffect(() => {
     if (skipReset.current) { skipReset.current = false; return; }
-    setCategoryId("");
-    setFundId("");
-    setReserveId("");
     setDestinationId("");
-    if (type === "expense") setAccountId(cub?.id ?? accounts[0]?.id ?? "");
-    else if (type === "fund_contribution" || type === "fund_withdrawal")
-      setAccountId(sbi?.id ?? accounts[0]?.id ?? "");
-    else if (type === "income") setAccountId(accounts[0]?.id ?? "");
-    else if (type === "transfer") setAccountId(accounts[0]?.id ?? "");
-    // reserve_accrual: account is derived from the chosen reserve
-  }, [type, accounts, cub?.id, sbi?.id]);
+    if (mode === "bucket") {
+      setSub(bucket === "Tax Reserve" ? "Tax Reserve" : "");
+      if (bucket === "Regular Expenses") setAccountId(cub?.id ?? accounts[0]?.id ?? "");
+      else if (bucket === "SIP Investments") setAccountId(hdfc?.id ?? accounts[0]?.id ?? "");
+      else setAccountId(sbi?.id ?? accounts[0]?.id ?? "");
+    } else {
+      setSub("");
+      setAccountId(accounts[0]?.id ?? "");
+    }
+  }, [mode, bucket, otherType, accounts, cub?.id, hdfc?.id, sbi?.id]);
 
   async function save() {
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt <= 0) { toast.error("Enter a positive amount"); return; }
     if (!date) { toast.error("Pick a date"); return; }
+    if (mode === "bucket" && !bucket) { toast.error("Pick a bucket"); return; }
 
     const row: Record<string, unknown> = {
       user_id: userId,
@@ -507,32 +592,49 @@ function AddTransactionDialog({
       category_id: null,
       fund_id: null,
       reserve_id: null,
+      bucket: mode === "bucket" ? bucket : null,
+      sub_category: null,
     };
 
-    if (type === "expense") {
+    if (mode === "bucket") {
+      if (bucket === "Tax Reserve") {
+        if (!taxReserve) return toast.error("No tax reserve configured");
+        row.reserve_id = taxReserve.id;
+        row.account_id = taxReserve.account_id;
+        row.sub_category = "Tax Reserve";
+      } else {
+        if (!sub) return toast.error("Pick a category");
+        if (!accountId) return toast.error("Pick an account");
+        row.account_id = accountId;
+        row.sub_category = sub;
+        if (bucket === "Regular Expenses" || bucket === "Fixed Commitments") {
+          const cat = categories.find((c) => c.name === sub);
+          if (!cat) return toast.error("Unknown category");
+          row.category_id = cat.id;
+        } else if (bucket === "Fund Contributions") {
+          const f = funds.find((x) => x.name === sub);
+          if (!f) return toast.error("Unknown fund");
+          row.fund_id = f.id;
+        }
+      }
+    } else if (otherType === "income") {
       if (!accountId) return toast.error("Pick an account");
-      if (!categoryId) return toast.error("Pick a category");
       row.account_id = accountId;
-      row.category_id = categoryId;
-    } else if (type === "income") {
-      if (!accountId) return toast.error("Pick an account");
-      row.account_id = accountId;
-    } else if (type === "transfer") {
+    } else if (otherType === "transfer" || otherType === "internal_loan_repayment") {
       if (!accountId || !destinationId) return toast.error("Pick both accounts");
       if (accountId === destinationId) return toast.error("Source and destination must differ");
       row.account_id = accountId;
       row.destination_account_id = destinationId;
-    } else if (type === "fund_contribution" || type === "fund_withdrawal") {
-      if (!fundId) return toast.error("Pick a fund");
+    } else if (otherType === "fund_withdrawal") {
       if (!accountId) return toast.error("Pick an account");
-      row.fund_id = fundId;
+      if (!sub) return toast.error("Pick a fund");
+      const f = funds.find((x) => x.name === sub);
+      if (!f) return toast.error("Unknown fund");
       row.account_id = accountId;
-    } else if (type === "reserve_accrual") {
-      if (!reserveId) return toast.error("Pick a reserve");
-      const r = reserves.find((x) => x.id === reserveId);
-      if (!r) return toast.error("Unknown reserve");
-      row.reserve_id = reserveId;
-      row.account_id = r.account_id;
+      row.fund_id = f.id;
+    } else {
+      if (!accountId) return toast.error("Pick an account");
+      row.account_id = accountId;
     }
 
     setBusy(true);
@@ -552,22 +654,84 @@ function AddTransactionDialog({
   }
 
   return (
-    <DialogContent className="sm:max-w-lg">
+    <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>{editing ? "Edit transaction" : "Add transaction"}</DialogTitle>
       </DialogHeader>
 
+      {/* Step 1 — Level 1 bucket */}
+      <div>
+        <Label className="text-xs text-muted-foreground mb-1.5 block">Bucket</Label>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {BUCKETS.map((b) => {
+            const active = mode === "bucket" && bucket === b;
+            return (
+              <button
+                key={b}
+                type="button"
+                onClick={() => { setMode("bucket"); setBucket(b); }}
+                className={
+                  "rounded-md border px-3 py-2 text-xs text-left transition-colors " +
+                  (active
+                    ? "border-primary bg-primary/10 text-foreground font-medium"
+                    : "border-input hover:bg-accent/40 text-muted-foreground")
+                }
+              >
+                {b}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setMode("other")}
+            className={
+              "rounded-md border px-3 py-2 text-xs text-left transition-colors " +
+              (mode === "other"
+                ? "border-primary bg-primary/10 text-foreground font-medium"
+                : "border-input hover:bg-accent/40 text-muted-foreground")
+            }
+          >
+            Non-spending transaction
+          </button>
+        </div>
+        {mode === "bucket" && bucket ? (
+          <div className="mt-2 text-xs text-muted-foreground">
+            Type: <span className="text-foreground font-medium">{txTypeLabel[type]}</span> (set automatically)
+          </div>
+        ) : null}
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Type">
-          <Select value={type} onValueChange={(v) => setType(v as TxType)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {(Object.keys(txTypeLabel) as TxType[]).map((k) => (
-                <SelectItem key={k} value={k}>{txTypeLabel[k]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
+        {/* Step 2 — Level 2 sub-category */}
+        {mode === "bucket" && bucket && bucket !== "Tax Reserve" ? (
+          <Field label="Category">
+            <Select value={sub} onValueChange={setSub}>
+              <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
+              <SelectContent>
+                {subOptions.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field>
+        ) : null}
+        {mode === "bucket" && bucket === "Tax Reserve" ? (
+          <Field label="Category">
+            <Input value="Tax Reserve" readOnly className="bg-muted/40" />
+          </Field>
+        ) : null}
+
+        {mode === "other" ? (
+          <Field label="Type">
+            <Select value={otherType} onValueChange={(v) => setOtherType(v as TxType)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {nonSpendingTypes.map((k) => (
+                  <SelectItem key={k} value={k}>{txTypeLabel[k]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        ) : null}
+
         <Field label="Date">
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
@@ -578,9 +742,20 @@ function AddTransactionDialog({
           />
         </Field>
 
-        {/* expense / income */}
-        {(type === "expense" || type === "income") && (
-          <Field label="Account">
+        {mode === "other" && otherType === "fund_withdrawal" ? (
+          <Field label="Fund">
+            <Select value={sub} onValueChange={setSub}>
+              <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
+              <SelectContent>
+                {funds.map((f) => <SelectItem key={f.id} value={f.name}>{f.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field>
+        ) : null}
+
+        {/* Accounts */}
+        {!(mode === "bucket" && bucket === "Tax Reserve") ? (
+          <Field label={type === "transfer" || type === "internal_loan_repayment" ? "From account" : "Account"}>
             <Select value={accountId} onValueChange={setAccountId}>
               <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
               <SelectContent>
@@ -588,87 +763,31 @@ function AddTransactionDialog({
               </SelectContent>
             </Select>
           </Field>
-        )}
-        {type === "expense" && (
-          <Field label="Category">
-            <Select value={categoryId} onValueChange={setCategoryId}>
+        ) : null}
+
+        {mode === "other" && (otherType === "transfer" || otherType === "internal_loan_repayment") ? (
+          <Field label="To account">
+            <Select value={destinationId} onValueChange={setDestinationId}>
               <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
               <SelectContent>
-                {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                {accounts.filter((a) => a.id !== accountId).map((a) => (
+                  <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </Field>
-        )}
-        {(type === "expense" || type === "income") && (
+        ) : null}
+
+        {type === "expense" || type === "income" ? (
           <Field label="Payment mode">
             <Input value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)} placeholder="UPI / Card / Cash" />
           </Field>
-        )}
+        ) : null}
 
-        {/* transfer */}
-        {type === "transfer" && (
-          <>
-            <Field label="From account">
-              <Select value={accountId} onValueChange={setAccountId}>
-                <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
-                <SelectContent>
-                  {accounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="To account">
-              <Select value={destinationId} onValueChange={setDestinationId}>
-                <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
-                <SelectContent>
-                  {accounts.filter((a) => a.id !== accountId).map((a) => (
-                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          </>
-        )}
-
-        {/* fund moves */}
-        {(type === "fund_contribution" || type === "fund_withdrawal") && (
-          <>
-            <Field label="Fund">
-              <Select value={fundId} onValueChange={setFundId}>
-                <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
-                <SelectContent>
-                  {funds.map((f) => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Account">
-              <Select value={accountId} onValueChange={setAccountId}>
-                <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
-                <SelectContent>
-                  {accounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-          </>
-        )}
-
-        {/* reserve accrual */}
-        {type === "reserve_accrual" && (
-          <Field label="Reserve">
-            <Select value={reserveId} onValueChange={setReserveId}>
-              <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
-              <SelectContent>
-                {reserves.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Field>
-        )}
-
-        {type !== "reserve_accrual" && (
-          <div className="col-span-2">
-            <Label className="text-xs text-muted-foreground mb-1.5 block">Description</Label>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional note" />
-          </div>
-        )}
+        <div className="col-span-2">
+          <Label className="text-xs text-muted-foreground mb-1.5 block">Description</Label>
+          <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional note" />
+        </div>
       </div>
 
       <DialogFooter>

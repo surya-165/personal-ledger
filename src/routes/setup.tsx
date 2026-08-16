@@ -28,7 +28,7 @@ export const Route = createFileRoute("/setup")({
 type AccountForm = { id: string; code: string; name: string; opening_balance: string; opening_date: string };
 type ReserveForm = { id: string; name: string; amount: string; monthly_accrual: string };
 type FundForm = { id: string; code: string; name: string; opening_balance: string; monthly_target: string };
-type CategoryForm = { id: string | null; name: string; monthly_limit: string; sort_order: number; _deleted?: boolean };
+type CategoryForm = { id: string | null; name: string; monthly_limit: string; sort_order: number; bucket: string; _deleted?: boolean };
 type InvestmentForm = {
   id: string | null;
   name: string;
@@ -78,7 +78,7 @@ function SetupPage() {
         supabase.from("accounts").select("id,code,name,opening_balance,opening_date").order("code"),
         supabase.from("reserves").select("id,name,amount,monthly_accrual,account_id").order("name"),
         supabase.from("funds").select("id,code,name,opening_balance,monthly_target").order("code"),
-        supabase.from("categories").select("id,name,monthly_limit,sort_order").order("sort_order"),
+        supabase.from("categories").select("id,name,monthly_limit,sort_order,bucket").order("sort_order"),
         supabase.from("investments").select("id,name,goal,monthly_amount,invested_total,active,kite_symbol").order("name"),
         supabase.from("budget_plan").select("*").maybeSingle(),
         supabase.from("recurring_templates").select("id,name,amount,type,account_id,destination_account_id").in("name", ["Salary", "Rent", "HDFC→CUB"]),
@@ -118,7 +118,7 @@ interface SetupData {
   accounts: Array<{ id: string; code: string; name: string; opening_balance: number; opening_date: string }>;
   reserves: Array<{ id: string; name: string; amount: number; monthly_accrual: number | null; account_id: string }>;
   funds: Array<{ id: string; code: string; name: string; opening_balance: number; monthly_target: number }>;
-  categories: Array<{ id: string; name: string; monthly_limit: number; sort_order: number }>;
+  categories: Array<{ id: string; name: string; monthly_limit: number; sort_order: number; bucket: string }>;
   investments: Array<{ id: string; name: string; goal: string; monthly_amount: number; invested_total: number; active: boolean; kite_symbol: string | null }>;
   plan: {
     planned_monthly_income: number; planned_car_emi: number; planned_maintenance: number;
@@ -156,6 +156,7 @@ function SetupForm({ userId, data, onSaved }: { userId: string; data: SetupData;
   const [categories, setCategories] = useState<CategoryForm[]>(
     data.categories.map((c) => ({
       id: c.id, name: c.name, monthly_limit: String(c.monthly_limit ?? 0), sort_order: c.sort_order,
+      bucket: c.bucket || (isFixedCategory(c.name) ? "Fixed Commitments" : "Regular Expenses"),
     })),
   );
 
@@ -197,7 +198,13 @@ function SetupForm({ userId, data, onSaved }: { userId: string; data: SetupData;
   // ---------- live derived figures ----------
   const income = num(plan.planned_monthly_income);
 
-  const visibleCategories = categories.filter((c) => !c._deleted && !isFixedCategory(c.name));
+  const visibleCategories = categories.filter(
+    (c) => !c._deleted && c.bucket === "Regular Expenses" && !isFixedCategory(c.name),
+  );
+  const extraCommitments = categories.filter(
+    (c) => !c._deleted && c.bucket === "Fixed Commitments" && !isFixedCategory(c.name),
+  );
+  const extraCommitmentsTotal = extraCommitments.reduce((s, c) => s + num(c.monthly_limit), 0);
   const categoriesTotal = visibleCategories.reduce((s, c) => s + num(c.monthly_limit), 0);
   const cubTransfer = num(recurring.hdfc_to_cub);
 
@@ -220,7 +227,7 @@ function SetupForm({ userId, data, onSaved }: { userId: string; data: SetupData;
   const sbiResidual = Math.min(sbiResidualRaw, fundTargetTotal);
   const hdfcTopUp = Math.max(0, fundTargetTotal - sbiResidual);
 
-  const allocated = cubTransfer + activeSipTotal + fundTargetTotal + carEmi + flatMaintenanceMonthly + taxAccrual;
+  const allocated = cubTransfer + activeSipTotal + fundTargetTotal + carEmi + flatMaintenanceMonthly + extraCommitmentsTotal + taxAccrual;
   const remaining = income - allocated;
   const remainingClass =
     Math.abs(remaining) < 0.5 ? "text-success" : remaining > 0 ? "text-warning" : "text-destructive";
@@ -287,14 +294,20 @@ function SetupForm({ userId, data, onSaved }: { userId: string; data: SetupData;
           continue;
         }
         if (c._deleted || !c.name.trim()) continue;
+        const nm = c.name.trim();
+        // Car EMI / Flat Maintenance amounts are driven by the plan inputs below.
+        const limit =
+          nm.toLowerCase() === "car emi" ? carEmi
+          : isFixedCategory(nm) ? flatMaintenance
+          : num(c.monthly_limit);
         if (c.id) {
           const { error } = await supabase.from("categories").update({
-            name: c.name.trim(), monthly_limit: num(c.monthly_limit), sort_order: c.sort_order,
+            name: nm, monthly_limit: limit, sort_order: c.sort_order, bucket: c.bucket,
           }).eq("id", c.id);
           if (error) throw error;
         } else {
           const { error } = await supabase.from("categories").insert({
-            user_id: userId, name: c.name.trim(), monthly_limit: num(c.monthly_limit), sort_order: c.sort_order,
+            user_id: userId, name: nm, monthly_limit: limit, sort_order: c.sort_order, bucket: c.bucket,
           });
           if (error) throw error;
         }
@@ -412,6 +425,7 @@ function SetupForm({ userId, data, onSaved }: { userId: string; data: SetupData;
             <Line label="Fund Contributions" value={fundTargetTotal} />
             <Line label="Car EMI" value={carEmi} />
             <Line label="Flat Maintenance (quarterly avg)" value={flatMaintenanceMonthly} />
+            <Line label="Other commitments" value={extraCommitmentsTotal} />
             <Line label="Tax Reserve" value={taxAccrual} />
           </div>
         </CardContent>
@@ -487,7 +501,7 @@ function SetupForm({ userId, data, onSaved }: { userId: string; data: SetupData;
       {/* SECTION 1 */}
       <Section title="1 · Regular Expenses" subtitle="Spending categories funded by the HDFC → CUB monthly transfer.">
         <div className="space-y-2">
-          {categories.map((c, i) => (c._deleted || isFixedCategory(c.name)) ? null : (
+          {categories.map((c, i) => (c._deleted || c.bucket !== "Regular Expenses" || isFixedCategory(c.name)) ? null : (
             <div key={c.id ?? `new-${i}`} className="grid grid-cols-[1fr_180px_40px] gap-2 items-center">
               <Input
                 placeholder="Category name"
@@ -511,7 +525,7 @@ function SetupForm({ userId, data, onSaved }: { userId: string; data: SetupData;
             type="button" variant="outline" size="sm" className="gap-1.5"
             onClick={() => setCategories((prev) => [
               ...prev,
-              { id: null, name: "", monthly_limit: "0", sort_order: (Math.max(0, ...prev.map((p) => p.sort_order)) + 1) },
+              { id: null, name: "", monthly_limit: "0", sort_order: (Math.max(0, ...prev.map((p) => p.sort_order)) + 1), bucket: "Regular Expenses" },
             ])}
           >
             <Plus className="h-4 w-4" /> Add category
@@ -653,8 +667,42 @@ function SetupForm({ userId, data, onSaved }: { userId: string; data: SetupData;
             <div className="text-xs text-muted-foreground pb-2.5">Quarterly — Jan, Apr, Jul, Oct — debited from SBI</div>
           </div>
           <Separator />
+          <div className="space-y-2">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Other commitments</div>
+            {categories.map((c, i) => (c._deleted || c.bucket !== "Fixed Commitments" || isFixedCategory(c.name)) ? null : (
+              <div key={c.id ?? `new-fx-${i}`} className="grid grid-cols-[1fr_180px_40px] gap-2 items-center">
+                <Input
+                  placeholder="Commitment name"
+                  value={c.name}
+                  onChange={(e) => setCategories((prev) => prev.map((x, idx) => idx === i ? { ...x, name: e.target.value } : x))}
+                />
+                <Input
+                  type="number" min="0" step="0.01" placeholder="Monthly amount"
+                  value={c.monthly_limit}
+                  onChange={(e) => setCategories((prev) => prev.map((x, idx) => idx === i ? { ...x, monthly_limit: e.target.value } : x))}
+                />
+                <Button
+                  type="button" variant="ghost" size="icon"
+                  onClick={() => setCategories((prev) => prev.map((x, idx) => idx === i ? { ...x, _deleted: true } : x))}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            <Button
+              type="button" variant="outline" size="sm" className="gap-1.5"
+              onClick={() => setCategories((prev) => [
+                ...prev,
+                { id: null, name: "", monthly_limit: "0", sort_order: (Math.max(0, ...prev.map((p) => p.sort_order)) + 1), bucket: "Fixed Commitments" },
+              ])}
+            >
+              <Plus className="h-4 w-4" /> Add commitment
+            </Button>
+          </div>
+          <Separator />
           <SummaryLine label="Car EMI (monthly)" value={carEmi} />
           <SummaryLine label="Flat Maintenance (quarterly avg)" value={flatMaintenanceMonthly} />
+          {extraCommitmentsTotal > 0 ? <SummaryLine label="Other commitments" value={extraCommitmentsTotal} /> : null}
         </div>
       </Section>
 

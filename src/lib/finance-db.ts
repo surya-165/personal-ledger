@@ -18,7 +18,36 @@ export interface AccountRow {
   role: string | null;
   opening_balance: number;
 }
-export interface CategoryRow { id: string; name: string; monthly_limit: number }
+export const BUCKETS = [
+  "Regular Expenses",
+  "SIP Investments",
+  "Fund Contributions",
+  "Fixed Commitments",
+  "Tax Reserve",
+] as const;
+export type Bucket = (typeof BUCKETS)[number];
+
+/** The transaction type implied by a Level 1 bucket. */
+export const bucketTxType: Record<Bucket, TxType> = {
+  "Regular Expenses": "expense",
+  "SIP Investments": "expense",
+  "Fund Contributions": "fund_contribution",
+  "Fixed Commitments": "expense",
+  "Tax Reserve": "reserve_accrual",
+};
+
+/** Non-spending types — they never belong to a bucket. */
+export const nonSpendingTypes: TxType[] = [
+  "income",
+  "transfer",
+  "fund_withdrawal",
+  "loan_given",
+  "loan_received",
+  "internal_loan_repayment",
+];
+
+export interface CategoryRow { id: string; name: string; monthly_limit: number; bucket: string }
+export interface InvestmentRow { id: string; name: string; active: boolean }
 export interface FundRow { id: string; code: string; name: string; account_id: string; monthly_target: number; opening_balance: number }
 export interface ReserveRow { id: string; name: string; account_id: string; kind: "floor" | "accrual"; amount: number; monthly_accrual: number | null }
 export interface TxRow {
@@ -34,6 +63,8 @@ export interface TxRow {
   amount: number;
   payment_mode: string | null;
   loan_id?: string | null;
+  bucket?: string | null;
+  sub_category?: string | null;
 }
 
 export type LoanKind = "external" | "internal";
@@ -53,15 +84,16 @@ export interface LoanRow {
 }
 
 export async function fetchAll(userId: string) {
-  const [accounts, categories, funds, reserves, transactions, loans] = await Promise.all([
+  const [accounts, categories, funds, reserves, transactions, loans, investments] = await Promise.all([
     supabase.from("accounts").select("id,code,name,role,opening_balance").order("code"),
-    supabase.from("categories").select("id,name,monthly_limit").order("sort_order"),
+    supabase.from("categories").select("id,name,monthly_limit,bucket").order("sort_order"),
     supabase.from("funds").select("id,code,name,account_id,monthly_target,opening_balance").order("code"),
     supabase.from("reserves").select("id,name,account_id,kind,amount,monthly_accrual").order("name"),
     supabase.from("transactions").select("*").order("date", { ascending: false }).order("created_at", { ascending: false }),
     supabase.from("loans" as never).select("*").order("disbursement_date", { ascending: false }),
+    supabase.from("investments").select("id,name,active").order("name"),
   ]);
-  const err = accounts.error ?? categories.error ?? funds.error ?? reserves.error ?? transactions.error ?? loans.error;
+  const err = accounts.error ?? categories.error ?? funds.error ?? reserves.error ?? transactions.error ?? loans.error ?? investments.error;
   if (err) throw err;
   return {
     accounts: (accounts.data ?? []) as AccountRow[],
@@ -70,6 +102,7 @@ export async function fetchAll(userId: string) {
     reserves: (reserves.data ?? []) as ReserveRow[],
     transactions: (transactions.data ?? []) as TxRow[],
     loans: (loans.data ?? []) as unknown as LoanRow[],
+    investments: (investments.data ?? []) as InvestmentRow[],
   };
   // userId is unused here because RLS scopes rows; kept for future composition.
   void userId;
