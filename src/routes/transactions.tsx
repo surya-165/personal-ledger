@@ -10,10 +10,15 @@ import {
   formatINR,
   txTypeLabel,
   computeAccountBalances,
+  BUCKETS,
+  bucketTxType,
+  nonSpendingTypes,
+  type Bucket,
   type TxType,
   type AccountRow,
   type CategoryRow,
   type FundRow,
+  type InvestmentRow,
   type ReserveRow,
   type TxRow,
 } from "@/lib/finance-db";
@@ -69,7 +74,8 @@ function TransactionsPage() {
   const [to, setTo] = useState(monthEndISO());
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
   const [accountFilter, setAccountFilter] = useState<string[]>([]);
-  const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
+  const [bucketFilter, setBucketFilter] = useState<string[]>([]);
+  const [subFilter, setSubFilter] = useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TxRow | null>(null);
   const [pendingDelete, setPendingDelete] = useState<TxRow | null>(null);
@@ -81,6 +87,43 @@ function TransactionsPage() {
   const categories = data?.categories ?? [];
   const funds = data?.funds ?? [];
   const reserves = data?.reserves ?? [];
+  const investments = data?.investments ?? [];
+
+  const categoryById = useMemo(
+    () => Object.fromEntries(categories.map((c) => [c.id, c])),
+    [categories],
+  );
+  const fundById = useMemo(() => Object.fromEntries(funds.map((f) => [f.id, f])), [funds]);
+
+  const subLabel = useMemo(
+    () => (t: TxRow) => {
+      if (t.sub_category) return t.sub_category;
+      if (t.category_id) return categoryById[t.category_id]?.name ?? "";
+      if (t.type === "fund_contribution" && t.fund_id) return fundById[t.fund_id]?.name ?? "";
+      if (t.type === "reserve_accrual") return "Tax Reserve";
+      return "";
+    },
+    [categoryById, fundById],
+  );
+
+  // Level 2 options, grouped by their Level 1 bucket.
+  const subsByBucket = useMemo(() => {
+    const m: Record<string, string[]> = {
+      "Regular Expenses": categories.filter((c) => c.bucket === "Regular Expenses").map((c) => c.name),
+      "SIP Investments": investments.map((i) => i.name),
+      "Fund Contributions": funds.map((f) => f.name),
+      "Fixed Commitments": categories.filter((c) => c.bucket === "Fixed Commitments").map((c) => c.name),
+      "Tax Reserve": ["Tax Reserve"],
+    };
+    return m;
+  }, [categories, investments, funds]);
+
+  const subOptions = useMemo(() => {
+    const buckets = bucketFilter.length > 0 ? bucketFilter : (BUCKETS as readonly string[]);
+    const names = new Set<string>();
+    for (const b of buckets) for (const n of subsByBucket[b] ?? []) names.add(n);
+    return [...names].map((n) => ({ value: n, label: n }));
+  }, [bucketFilter, subsByBucket]);
 
   const balances = useMemo(
     () => computeAccountBalances(accounts, transactions),
@@ -93,16 +136,17 @@ function TransactionsPage() {
       if (to && t.date > to) return false;
       if (typeFilter.length > 0 && !typeFilter.includes(t.type)) return false;
       if (accountFilter.length > 0 && !accountFilter.includes(t.account_id)) return false;
-      if (categoryFilter.length > 0 && (!t.category_id || !categoryFilter.includes(t.category_id))) return false;
+      if (bucketFilter.length > 0 && (!t.bucket || !bucketFilter.includes(t.bucket))) return false;
+      if (subFilter.length > 0 && !subFilter.includes(subLabel(t))) return false;
       return true;
     });
-  }, [transactions, from, to, typeFilter, accountFilter, categoryFilter]);
+  }, [transactions, from, to, typeFilter, accountFilter, bucketFilter, subFilter, subLabel]);
 
   const hasAnyFilter =
-    !!from || !!to || typeFilter.length > 0 || accountFilter.length > 0 || categoryFilter.length > 0;
+    !!from || !!to || typeFilter.length > 0 || accountFilter.length > 0 || bucketFilter.length > 0 || subFilter.length > 0;
   const clearAll = () => {
     setFrom(""); setTo("");
-    setTypeFilter([]); setAccountFilter([]); setCategoryFilter([]);
+    setTypeFilter([]); setAccountFilter([]); setBucketFilter([]); setSubFilter([]);
   };
 
   async function confirmDelete() {
@@ -125,7 +169,6 @@ function TransactionsPage() {
   }
 
   const accountById = Object.fromEntries(accounts.map((a) => [a.id, a]));
-  const categoryById = Object.fromEntries(categories.map((c) => [c.id, c]));
 
   return (
     <div>
@@ -141,6 +184,7 @@ function TransactionsPage() {
               categories={categories}
               funds={funds}
               reserves={reserves}
+              investments={investments}
               userId={user!.id}
               onSaved={() => {
                 setDialogOpen(false);
@@ -173,7 +217,7 @@ function TransactionsPage() {
       ) : null}
 
       <Card className="mb-5">
-        <CardContent className="pt-6 grid grid-cols-2 md:grid-cols-5 gap-3">
+        <CardContent className="pt-6 grid grid-cols-2 md:grid-cols-6 gap-3">
           <Field label="From"><DateInput value={from} onChange={setFrom} /></Field>
           <Field label="To"><DateInput value={to} onChange={setTo} /></Field>
           <Field label="Type">
@@ -192,16 +236,30 @@ function TransactionsPage() {
               options={accounts.map((a) => ({ value: a.id, label: a.name }))}
             />
           </Field>
+          <Field label="Bucket">
+            <MultiSelect
+              placeholder="All buckets"
+              value={bucketFilter}
+              onChange={(v) => {
+                setBucketFilter(v);
+                const allowed = new Set(
+                  (v.length > 0 ? v : (BUCKETS as readonly string[])).flatMap((b) => subsByBucket[b] ?? []),
+                );
+                setSubFilter((prev) => prev.filter((s) => allowed.has(s)));
+              }}
+              options={BUCKETS.map((b) => ({ value: b, label: b }))}
+            />
+          </Field>
           <Field label="Category">
             <MultiSelect
               placeholder="All categories"
-              value={categoryFilter}
-              onChange={setCategoryFilter}
-              options={categories.map((c) => ({ value: c.id, label: c.name }))}
+              value={subFilter}
+              onChange={setSubFilter}
+              options={subOptions}
             />
           </Field>
           {hasAnyFilter ? (
-            <div className="col-span-2 md:col-span-5 flex justify-end">
+            <div className="col-span-2 md:col-span-6 flex justify-end">
               <Button size="sm" variant="ghost" onClick={clearAll}>Clear all</Button>
             </div>
           ) : null}
@@ -217,6 +275,7 @@ function TransactionsPage() {
                 <th className="px-5 py-3 font-medium">Description</th>
                 <th className="px-5 py-3 font-medium">Type</th>
                 <th className="px-5 py-3 font-medium">Account</th>
+                <th className="px-5 py-3 font-medium">Bucket</th>
                 <th className="px-5 py-3 font-medium">Category</th>
                 <th className="px-5 py-3 font-medium text-right">Amount</th>
               </tr>
@@ -245,8 +304,11 @@ function TransactionsPage() {
                       </Badge>
                     </td>
                     <td className="px-5 py-3.5">{accountById[t.account_id]?.name ?? ""}</td>
+                    <td className="px-5 py-3.5 text-muted-foreground whitespace-nowrap">
+                      {t.bucket ? t.bucket : "—"}
+                    </td>
                     <td className="px-5 py-3.5 text-muted-foreground">
-                      {t.category_id ? categoryById[t.category_id]?.name : "—"}
+                      {t.bucket ? (subLabel(t) || "—") : txTypeLabel[t.type]}
                     </td>
                     <td className={
                       "px-5 py-3.5 text-right tabular-nums font-medium whitespace-nowrap " +
@@ -277,7 +339,7 @@ function TransactionsPage() {
               })}
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-muted-foreground">
+                  <td colSpan={8} className="px-5 py-10 text-center text-sm text-muted-foreground">
                     {dataQuery.isLoading ? "Loading…" : "No transactions yet. Use Add to record your first one."}
                   </td>
                 </tr>
@@ -295,6 +357,7 @@ function TransactionsPage() {
             categories={categories}
             funds={funds}
             reserves={reserves}
+            investments={investments}
             userId={user!.id}
             editing={editing}
             onSaved={() => {
