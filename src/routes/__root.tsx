@@ -164,7 +164,7 @@ function RootComponent() {
           <div className="flex-1 flex flex-col min-w-0">
             <header className="h-14 flex items-center gap-3 border-b border-border bg-background/80 backdrop-blur px-4 sticky top-0 z-10">
               <SidebarTrigger />
-              <div className="text-sm text-muted-foreground">June 2026</div>
+              <div className="text-sm text-muted-foreground">{sectionTitle}</div>
             </header>
             <main className="flex-1 p-6 lg:p-8 w-full max-w-[1400px] mx-auto">
               {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
