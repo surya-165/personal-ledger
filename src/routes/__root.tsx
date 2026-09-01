@@ -120,10 +120,26 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+const SECTION_TITLES: Array<[string, string]> = [
+  ["/transactions", "Transactions"],
+  ["/accounts", "Accounts"],
+  ["/funds", "Funds"],
+  ["/budgets", "Budgets"],
+  ["/investments", "Investments"],
+  ["/loans", "Loans"],
+  ["/setup", "Setup"],
+  ["/zerodha-callback", "Zerodha"],
+];
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
   const didRedirect = useRef(false);
+
+  const sectionTitle =
+    SECTION_TITLES.find(([prefix]) => pathname.startsWith(prefix))?.[1] ??
+    "Dashboard";
 
   // Always land on the Dashboard on a fresh page load / refresh.
   useEffect(() => {
