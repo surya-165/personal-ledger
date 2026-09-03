@@ -155,9 +155,11 @@ export function computeAccountBalances(
         out[t.account_id] = (out[t.account_id] ?? 0) + amt;
         break;
       case "expense":
-      case "fund_contribution":
       case "loan_given":
         out[t.account_id] = (out[t.account_id] ?? 0) - amt;
+        break;
+      case "fund_contribution":
+        // Earmark within the account — does not change total balance.
         break;
       case "transfer":
       case "internal_loan_repayment":
