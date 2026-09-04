@@ -531,6 +531,36 @@ export type Database = {
           },
         ]
       }
+      month_closures: {
+        Row: {
+          closed_at: string
+          created_at: string
+          id: string
+          month: string
+          notes: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          closed_at?: string
+          created_at?: string
+          id?: string
+          month: string
+          notes?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          closed_at?: string
+          created_at?: string
+          id?: string
+          month?: string
+          notes?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       recurring_templates: {
         Row: {
           account_id: string
@@ -658,6 +688,86 @@ export type Database = {
             columns: ["account_id"]
             isOneToOne: false
             referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      surplus_entries: {
+        Row: {
+          actual_amount: number
+          bucket: string
+          closure_id: string
+          created_at: string
+          destination_account_id: string | null
+          destination_note: string | null
+          id: string
+          month: string
+          planned_amount: number
+          source_account_id: string | null
+          surplus_amount: number
+          transfer_transaction_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          actual_amount?: number
+          bucket: string
+          closure_id: string
+          created_at?: string
+          destination_account_id?: string | null
+          destination_note?: string | null
+          id?: string
+          month: string
+          planned_amount?: number
+          source_account_id?: string | null
+          surplus_amount?: number
+          transfer_transaction_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          actual_amount?: number
+          bucket?: string
+          closure_id?: string
+          created_at?: string
+          destination_account_id?: string | null
+          destination_note?: string | null
+          id?: string
+          month?: string
+          planned_amount?: number
+          source_account_id?: string | null
+          surplus_amount?: number
+          transfer_transaction_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "surplus_entries_closure_id_fkey"
+            columns: ["closure_id"]
+            isOneToOne: false
+            referencedRelation: "month_closures"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "surplus_entries_destination_account_id_fkey"
+            columns: ["destination_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "surplus_entries_source_account_id_fkey"
+            columns: ["source_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "surplus_entries_transfer_transaction_id_fkey"
+            columns: ["transfer_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
             referencedColumns: ["id"]
           },
         ]

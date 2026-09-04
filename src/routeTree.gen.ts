@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ZerodhaCallbackRouteImport } from './routes/zerodha-callback'
 import { Route as TransactionsRouteImport } from './routes/transactions'
+import { Route as SurplusRouteImport } from './routes/surplus'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as LoansRouteImport } from './routes/loans'
 import { Route as InvestmentsRouteImport } from './routes/investments'
@@ -28,6 +29,11 @@ const ZerodhaCallbackRoute = ZerodhaCallbackRouteImport.update({
 const TransactionsRoute = TransactionsRouteImport.update({
   id: '/transactions',
   path: '/transactions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SurplusRoute = SurplusRouteImport.update({
+  id: '/surplus',
+  path: '/surplus',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SetupRoute = SetupRouteImport.update({
@@ -80,6 +86,7 @@ export interface FileRoutesByFullPath {
   '/investments': typeof InvestmentsRoute
   '/loans': typeof LoansRoute
   '/setup': typeof SetupRoute
+  '/surplus': typeof SurplusRoute
   '/transactions': typeof TransactionsRoute
   '/zerodha-callback': typeof ZerodhaCallbackRoute
 }
@@ -92,6 +99,7 @@ export interface FileRoutesByTo {
   '/investments': typeof InvestmentsRoute
   '/loans': typeof LoansRoute
   '/setup': typeof SetupRoute
+  '/surplus': typeof SurplusRoute
   '/transactions': typeof TransactionsRoute
   '/zerodha-callback': typeof ZerodhaCallbackRoute
 }
@@ -105,6 +113,7 @@ export interface FileRoutesById {
   '/investments': typeof InvestmentsRoute
   '/loans': typeof LoansRoute
   '/setup': typeof SetupRoute
+  '/surplus': typeof SurplusRoute
   '/transactions': typeof TransactionsRoute
   '/zerodha-callback': typeof ZerodhaCallbackRoute
 }
@@ -119,6 +128,7 @@ export interface FileRouteTypes {
     | '/investments'
     | '/loans'
     | '/setup'
+    | '/surplus'
     | '/transactions'
     | '/zerodha-callback'
   fileRoutesByTo: FileRoutesByTo
@@ -131,6 +141,7 @@ export interface FileRouteTypes {
     | '/investments'
     | '/loans'
     | '/setup'
+    | '/surplus'
     | '/transactions'
     | '/zerodha-callback'
   id:
@@ -143,6 +154,7 @@ export interface FileRouteTypes {
     | '/investments'
     | '/loans'
     | '/setup'
+    | '/surplus'
     | '/transactions'
     | '/zerodha-callback'
   fileRoutesById: FileRoutesById
@@ -156,6 +168,7 @@ export interface RootRouteChildren {
   InvestmentsRoute: typeof InvestmentsRoute
   LoansRoute: typeof LoansRoute
   SetupRoute: typeof SetupRoute
+  SurplusRoute: typeof SurplusRoute
   TransactionsRoute: typeof TransactionsRoute
   ZerodhaCallbackRoute: typeof ZerodhaCallbackRoute
 }
@@ -174,6 +187,13 @@ declare module '@tanstack/react-router' {
       path: '/transactions'
       fullPath: '/transactions'
       preLoaderRoute: typeof TransactionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/surplus': {
+      id: '/surplus'
+      path: '/surplus'
+      fullPath: '/surplus'
+      preLoaderRoute: typeof SurplusRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/setup': {
@@ -244,6 +264,7 @@ const rootRouteChildren: RootRouteChildren = {
   InvestmentsRoute: InvestmentsRoute,
   LoansRoute: LoansRoute,
   SetupRoute: SetupRoute,
+  SurplusRoute: SurplusRoute,
   TransactionsRoute: TransactionsRoute,
   ZerodhaCallbackRoute: ZerodhaCallbackRoute,
 }
