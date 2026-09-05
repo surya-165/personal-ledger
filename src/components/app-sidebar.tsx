@@ -4,6 +4,7 @@ import {
   ArrowLeftRight,
   Wallet,
   PiggyBank,
+  Vault,
   Target,
   TrendingUp,
   HandCoins,
