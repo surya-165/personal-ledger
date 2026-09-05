@@ -208,16 +208,65 @@ function Dashboard() {
   const unallocated = plannedIncome - totalAllocated;
   const remainderMissing = Math.abs(unallocated) > 0.5;
 
+  // Close-month availability: on/after last day, not already closed, month has transactions.
+  const hasTransactions = monthTx.length > 0;
+  const canClose = !isClosed && hasTransactions && todayISO >= lastDayISO;
+
+  const closeFigures: BucketFigure[] = [
+    { bucket: "Regular Expenses", planned: plannedRegular, actual: actualRegular },
+    { bucket: "SIP Investments", planned: plannedSIP, actual: actualSIP },
+    { bucket: "Fund Contributions", planned: plannedFundsTotal, actual: actualFunds },
+    { bucket: "Fixed Commitments", planned: plannedFixed, actual: actualFixed },
+    { bucket: "Tax Reserve", planned: plannedTax, actual: actualTax },
+  ];
+
   const go = (l: Level) => setLevel(l);
 
   return (
     <div>
       <PageHeader
-        title={monthLabel}
-        description="This month's income and how every rupee is being allocated."
+        title="Dashboard"
+        description="Monthly income and how every rupee is being allocated."
       />
 
-      {level.name === "l1" ? <RecurringPanel /> : null}
+      {/* Month navigator */}
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon" onClick={prevMonth} aria-label="Previous month">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <div className="min-w-40 text-center">
+            <span className="text-sm font-medium">{monthLabel}</span>
+            {isClosed ? (
+              <span className="ml-2 inline-flex items-center rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
+                Closed ✓
+              </span>
+            ) : null}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={nextMonth}
+            disabled={isCurrentMonth}
+            aria-label="Next month"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+        {canClose ? (
+          <Button size="sm" variant="outline" onClick={() => setCloseOpen(true)}>
+            <Lock className="mr-1.5 h-3.5 w-3.5" /> Close month
+          </Button>
+        ) : null}
+      </div>
+
+      {!isCurrentMonth ? (
+        <div className="mb-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          Viewing {monthLabel} — read only
+        </div>
+      ) : null}
+
+      {isCurrentMonth && level.name === "l1" ? <RecurringPanel /> : null}
 
       {/* Sticky planned-income header — persists across all levels */}
       <Card className="mb-6 sticky top-2 z-10 backdrop-blur bg-card/95">
