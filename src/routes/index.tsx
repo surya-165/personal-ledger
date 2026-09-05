@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, AlertTriangle, Lock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { fetchAll, seedIfEmpty, formatINR, type Bucket } from "@/lib/finance-db";
+import { fetchAll, seedIfEmpty, formatINR } from "@/lib/finance-db";
 import { PageHeader } from "@/components/finance/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -350,6 +350,17 @@ function Dashboard() {
           />
         ) : null}
       </div>
+
+      <CloseMonthDialog
+        open={closeOpen}
+        onOpenChange={setCloseOpen}
+        userId={user!.id}
+        month={thisMonthKey}
+        monthLabel={monthLabel}
+        lastDay={lastDayISO}
+        figures={closeFigures}
+        accounts={data.accounts}
+      />
     </div>
   );
 }
