@@ -27,6 +27,7 @@ const items = [
   { title: "Transactions", url: "/transactions", icon: ArrowLeftRight },
   { title: "Accounts", url: "/accounts", icon: Wallet },
   { title: "Funds", url: "/funds", icon: PiggyBank },
+  { title: "Surplus", url: "/surplus", icon: Vault },
   { title: "Budgets", url: "/budgets", icon: Target },
   { title: "Investments", url: "/investments", icon: TrendingUp },
   { title: "Loans", url: "/loans", icon: HandCoins },
