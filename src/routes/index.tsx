@@ -64,12 +64,38 @@ function Dashboard() {
   });
 
   const [level, setLevel] = useState<Level>({ name: "l1" });
+  const [closeOpen, setCloseOpen] = useState(false);
 
   const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth() + 1;
+  const curYear = today.getFullYear();
+  const curMonth = today.getMonth() + 1;
+  const [view, setView] = useState({ year: curYear, month: curMonth });
+  const year = view.year;
+  const month = view.month;
+  const isCurrentMonth = year === curYear && month === curMonth;
   const monthPrefix = `${year}-${String(month).padStart(2, "0")}`;
-  const monthLabel = today.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+
+  const prevMonth = () => setView((v) => (v.month === 1 ? { year: v.year - 1, month: 12 } : { ...v, month: v.month - 1 }));
+  const nextMonth = () => {
+    if (isCurrentMonth) return;
+    setView((v) => (v.month === 12 ? { year: v.year + 1, month: 1 } : { ...v, month: v.month + 1 }));
+  };
+
+  const closuresQuery = useQuery({
+    queryKey: ["month-closures", user?.id],
+    enabled: !!user,
+    queryFn: fetchClosures,
+  });
+  const closedMonths = useMemo(
+    () => new Set((closuresQuery.data ?? []).map((c) => c.month)),
+    [closuresQuery.data],
+  );
+  const thisMonthKey = monthKey(year, month);
+  const isClosed = closedMonths.has(thisMonthKey);
+  const lastDay = lastDayOfMonth(year, month);
+  const lastDayISO = `${year}-${String(month).padStart(2, "0")}-${String(lastDay.getDate()).padStart(2, "0")}`;
+  const todayISO = `${curYear}-${String(curMonth).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
   const data = dataQuery.data;
   const planData = planQuery.data;
