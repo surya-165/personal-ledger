@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
+import { ChevronLeft, ChevronRight, AlertTriangle, Lock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { fetchAll, seedIfEmpty, formatINR } from "@/lib/finance-db";
@@ -9,6 +9,8 @@ import { PageHeader } from "@/components/finance/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { RecurringPanel } from "@/components/finance/recurring-panel";
+import { CloseMonthDialog, type BucketFigure } from "@/components/finance/close-month-dialog";
+import { fetchClosures, monthKey, lastDayOfMonth } from "@/lib/month-close";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -62,12 +64,38 @@ function Dashboard() {
   });
 
   const [level, setLevel] = useState<Level>({ name: "l1" });
+  const [closeOpen, setCloseOpen] = useState(false);
 
   const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth() + 1;
+  const curYear = today.getFullYear();
+  const curMonth = today.getMonth() + 1;
+  const [view, setView] = useState({ year: curYear, month: curMonth });
+  const year = view.year;
+  const month = view.month;
+  const isCurrentMonth = year === curYear && month === curMonth;
   const monthPrefix = `${year}-${String(month).padStart(2, "0")}`;
-  const monthLabel = today.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+
+  const prevMonth = () => setView((v) => (v.month === 1 ? { year: v.year - 1, month: 12 } : { ...v, month: v.month - 1 }));
+  const nextMonth = () => {
+    if (isCurrentMonth) return;
+    setView((v) => (v.month === 12 ? { year: v.year + 1, month: 1 } : { ...v, month: v.month + 1 }));
+  };
+
+  const closuresQuery = useQuery({
+    queryKey: ["month-closures", user?.id],
+    enabled: !!user,
+    queryFn: fetchClosures,
+  });
+  const closedMonths = useMemo(
+    () => new Set((closuresQuery.data ?? []).map((c) => c.month)),
+    [closuresQuery.data],
+  );
+  const thisMonthKey = monthKey(year, month);
+  const isClosed = closedMonths.has(thisMonthKey);
+  const lastDay = lastDayOfMonth(year, month);
+  const lastDayISO = `${year}-${String(month).padStart(2, "0")}-${String(lastDay.getDate()).padStart(2, "0")}`;
+  const todayISO = `${curYear}-${String(curMonth).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
   const data = dataQuery.data;
   const planData = planQuery.data;
@@ -180,16 +208,65 @@ function Dashboard() {
   const unallocated = plannedIncome - totalAllocated;
   const remainderMissing = Math.abs(unallocated) > 0.5;
 
+  // Close-month availability: on/after last day, not already closed, month has transactions.
+  const hasTransactions = monthTx.length > 0;
+  const canClose = !isClosed && hasTransactions && todayISO >= lastDayISO;
+
+  const closeFigures: BucketFigure[] = [
+    { bucket: "Regular Expenses", planned: plannedRegular, actual: actualRegular },
+    { bucket: "SIP Investments", planned: plannedSIP, actual: actualSIP },
+    { bucket: "Fund Contributions", planned: plannedFundsTotal, actual: actualFunds },
+    { bucket: "Fixed Commitments", planned: plannedFixed, actual: actualFixed },
+    { bucket: "Tax Reserve", planned: plannedTax, actual: actualTax },
+  ];
+
   const go = (l: Level) => setLevel(l);
 
   return (
     <div>
       <PageHeader
-        title={monthLabel}
-        description="This month's income and how every rupee is being allocated."
+        title="Dashboard"
+        description="Monthly income and how every rupee is being allocated."
       />
 
-      {level.name === "l1" ? <RecurringPanel /> : null}
+      {/* Month navigator */}
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon" onClick={prevMonth} aria-label="Previous month">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <div className="min-w-40 text-center">
+            <span className="text-sm font-medium">{monthLabel}</span>
+            {isClosed ? (
+              <span className="ml-2 inline-flex items-center rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
+                Closed ✓
+              </span>
+            ) : null}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={nextMonth}
+            disabled={isCurrentMonth}
+            aria-label="Next month"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+        {canClose ? (
+          <Button size="sm" variant="outline" onClick={() => setCloseOpen(true)}>
+            <Lock className="mr-1.5 h-3.5 w-3.5" /> Close month
+          </Button>
+        ) : null}
+      </div>
+
+      {!isCurrentMonth ? (
+        <div className="mb-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          Viewing {monthLabel} — read only
+        </div>
+      ) : null}
+
+      {isCurrentMonth && level.name === "l1" ? <RecurringPanel /> : null}
 
       {/* Sticky planned-income header — persists across all levels */}
       <Card className="mb-6 sticky top-2 z-10 backdrop-blur bg-card/95">
@@ -273,6 +350,17 @@ function Dashboard() {
           />
         ) : null}
       </div>
+
+      <CloseMonthDialog
+        open={closeOpen}
+        onOpenChange={setCloseOpen}
+        userId={user!.id}
+        month={thisMonthKey}
+        monthLabel={monthLabel}
+        lastDay={lastDayISO}
+        figures={closeFigures}
+        accounts={data.accounts}
+      />
     </div>
   );
 }
