@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, LogOut, Calendar as CalendarIcon, X, Trash2, Pencil, ChevronDown } from "lucide-react";
+import { Plus, LogOut, Calendar as CalendarIcon, X, Trash2, Pencil, ChevronDown, Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -89,6 +89,25 @@ function TransactionsPage() {
   const reserves = data?.reserves ?? [];
   const investments = data?.investments ?? [];
 
+  // Account card filters default to all accounts once data loads.
+  useEffect(() => {
+    if (accounts.length > 0 && accountFilter.length === 0) {
+      setAccountFilter(accounts.map((a) => a.id));
+    }
+  }, [accounts, accountFilter.length]);
+
+  const toggleAccount = (id: string) => {
+    setAccountFilter((prev) => {
+      if (prev.includes(id)) {
+        // Always keep at least one account selected.
+        if (prev.length === 1) return prev;
+        return prev.filter((x) => x !== id);
+      }
+      return [...prev, id];
+    });
+  };
+
+
   const categoryById = useMemo(
     () => Object.fromEntries(categories.map((c) => [c.id, c])),
     [categories],
@@ -142,12 +161,14 @@ function TransactionsPage() {
     });
   }, [transactions, from, to, typeFilter, accountFilter, bucketFilter, subFilter, subLabel]);
 
+  const accountFilterActive = accountFilter.length > 0 && accountFilter.length < accounts.length;
   const hasAnyFilter =
-    !!from || !!to || typeFilter.length > 0 || accountFilter.length > 0 || bucketFilter.length > 0 || subFilter.length > 0;
+    !!from || !!to || typeFilter.length > 0 || accountFilterActive || bucketFilter.length > 0 || subFilter.length > 0;
   const clearAll = () => {
     setFrom(""); setTo("");
-    setTypeFilter([]); setAccountFilter([]); setBucketFilter([]); setSubFilter([]);
+    setTypeFilter([]); setAccountFilter(accounts.map((a) => a.id)); setBucketFilter([]); setSubFilter([]);
   };
+
 
   async function confirmDelete() {
     if (!pendingDelete) return;
@@ -203,21 +224,49 @@ function TransactionsPage() {
       </div>
 
       {accounts.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
-          {accounts.map((a) => (
-            <Card key={a.id} className="w-full min-w-0">
-              <CardContent className="pt-5 min-w-0">
-                <div className="text-xs text-muted-foreground truncate">{a.name}</div>
-                <div className="text-lg font-semibold tabular-nums break-words">{formatINR(balances[a.id] ?? 0)}</div>
-                <div className="text-[11px] text-muted-foreground mt-0.5">Current balance</div>
-              </CardContent>
-            </Card>
-          ))}
+        <div className="mb-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {accounts.map((a) => {
+              const selected = accountFilter.includes(a.id);
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => toggleAccount(a.id)}
+                  className={
+                    "relative text-left w-full min-w-0 rounded-xl border transition-all " +
+                    (selected
+                      ? "border-primary bg-primary/10 shadow-sm"
+                      : "border-border bg-card opacity-60 hover:opacity-80")
+                  }
+                >
+                  <div className="p-5">
+                    <div className="flex items-start justify-between">
+                      <div className="text-xs text-muted-foreground truncate">{a.name}</div>
+                      {selected ? (
+                        <div className="rounded-full bg-primary text-primary-foreground p-0.5">
+                          <Check className="h-3 w-3" />
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="text-lg font-semibold tabular-nums break-words">{formatINR(balances[a.id] ?? 0)}</div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5">Current balance</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-2 text-xs text-muted-foreground">
+            {accountFilter.length === 0 || accountFilter.length === accounts.length
+              ? "Showing all accounts"
+              : `Showing: ${accounts.filter((a) => accountFilter.includes(a.id)).map((a) => a.name).join(", ")}`}
+          </div>
         </div>
       ) : null}
 
+
       <Card className="mb-5">
-        <CardContent className="pt-6 grid grid-cols-2 md:grid-cols-6 gap-3">
+        <CardContent className="pt-6 grid grid-cols-2 md:grid-cols-5 gap-3">
           <Field label="From"><DateInput value={from} onChange={setFrom} /></Field>
           <Field label="To"><DateInput value={to} onChange={setTo} /></Field>
           <Field label="Type">
@@ -226,14 +275,6 @@ function TransactionsPage() {
               value={typeFilter}
               onChange={setTypeFilter}
               options={(Object.keys(txTypeLabel) as TxType[]).map((k) => ({ value: k, label: txTypeLabel[k] }))}
-            />
-          </Field>
-          <Field label="Account">
-            <MultiSelect
-              placeholder="All accounts"
-              value={accountFilter}
-              onChange={setAccountFilter}
-              options={accounts.map((a) => ({ value: a.id, label: a.name }))}
             />
           </Field>
           <Field label="Bucket">
@@ -259,7 +300,7 @@ function TransactionsPage() {
             />
           </Field>
           {hasAnyFilter ? (
-            <div className="col-span-2 md:col-span-6 flex justify-end">
+            <div className="col-span-2 md:col-span-5 flex justify-end">
               <Button size="sm" variant="ghost" onClick={clearAll}>Clear all</Button>
             </div>
           ) : null}
