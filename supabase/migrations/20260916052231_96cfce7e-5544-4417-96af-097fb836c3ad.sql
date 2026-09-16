@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.tg_sync_credit_card_paid() FROM PUBLIC, anon, authenticated;
