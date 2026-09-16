@@ -107,7 +107,7 @@ export interface LoanRow {
 }
 
 export async function fetchAll(userId: string) {
-  const [accounts, categories, funds, reserves, transactions, loans, investments] = await Promise.all([
+  const [accounts, categories, funds, reserves, transactions, loans, investments, ccPayments] = await Promise.all([
     supabase.from("accounts").select("id,code,name,role,opening_balance").order("code"),
     supabase.from("categories").select("id,name,monthly_limit,bucket").order("sort_order"),
     supabase.from("funds").select("id,code,name,account_id,monthly_target,opening_balance").order("code"),
@@ -115,17 +115,22 @@ export async function fetchAll(userId: string) {
     supabase.from("transactions").select("*").order("date", { ascending: false }).order("created_at", { ascending: false }),
     supabase.from("loans" as never).select("*").order("disbursement_date", { ascending: false }),
     supabase.from("investments").select("id,name,active").order("name"),
+    supabase.from("credit_card_payments" as never).select("*").order("payment_date", { ascending: false }),
   ]);
-  const err = accounts.error ?? categories.error ?? funds.error ?? reserves.error ?? transactions.error ?? loans.error ?? investments.error;
+  const err = accounts.error ?? categories.error ?? funds.error ?? reserves.error ?? transactions.error ?? loans.error ?? investments.error ?? ccPayments.error;
   if (err) throw err;
+  const allAccounts = (accounts.data ?? []) as AccountRow[];
   return {
-    accounts: (accounts.data ?? []) as AccountRow[],
+    // Bank accounts only — the credit card is a liability, not a real account.
+    accounts: allAccounts.filter((a) => a.code !== CREDIT_CARD_CODE),
+    creditCardAccount: allAccounts.find((a) => a.code === CREDIT_CARD_CODE) ?? null,
     categories: (categories.data ?? []) as CategoryRow[],
     funds: (funds.data ?? []) as FundRow[],
     reserves: (reserves.data ?? []) as ReserveRow[],
     transactions: (transactions.data ?? []) as TxRow[],
     loans: (loans.data ?? []) as unknown as LoanRow[],
     investments: (investments.data ?? []) as InvestmentRow[],
+    creditCardPayments: (ccPayments.data ?? []) as unknown as CreditCardPaymentRow[],
   };
   // userId is unused here because RLS scopes rows; kept for future composition.
   void userId;
