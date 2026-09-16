@@ -125,6 +125,67 @@ export type Database = {
         }
         Relationships: []
       }
+      credit_card_payments: {
+        Row: {
+          created_at: string
+          id: string
+          note: string | null
+          paid_from_account_id: string
+          payment_amount: number
+          payment_date: string
+          payment_transaction_id: string | null
+          transaction_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          note?: string | null
+          paid_from_account_id: string
+          payment_amount: number
+          payment_date: string
+          payment_transaction_id?: string | null
+          transaction_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          note?: string | null
+          paid_from_account_id?: string
+          payment_amount?: number
+          payment_date?: string
+          payment_transaction_id?: string | null
+          transaction_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_card_payments_paid_from_account_id_fkey"
+            columns: ["paid_from_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_card_payments_payment_transaction_id_fkey"
+            columns: ["payment_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_card_payments_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       funds: {
         Row: {
           account_id: string
@@ -779,11 +840,16 @@ export type Database = {
           bucket: string | null
           category_id: string | null
           created_at: string
+          credit_card_paid_amount: number
+          credit_card_payment_status:
+            | Database["public"]["Enums"]["credit_card_payment_status"]
+            | null
           date: string
           description: string
           destination_account_id: string | null
           fund_id: string | null
           id: string
+          is_credit_card: boolean
           loan_id: string | null
           payment_mode: string | null
           reserve_id: string | null
@@ -798,11 +864,16 @@ export type Database = {
           bucket?: string | null
           category_id?: string | null
           created_at?: string
+          credit_card_paid_amount?: number
+          credit_card_payment_status?:
+            | Database["public"]["Enums"]["credit_card_payment_status"]
+            | null
           date: string
           description?: string
           destination_account_id?: string | null
           fund_id?: string | null
           id?: string
+          is_credit_card?: boolean
           loan_id?: string | null
           payment_mode?: string | null
           reserve_id?: string | null
@@ -817,11 +888,16 @@ export type Database = {
           bucket?: string | null
           category_id?: string | null
           created_at?: string
+          credit_card_paid_amount?: number
+          credit_card_payment_status?:
+            | Database["public"]["Enums"]["credit_card_payment_status"]
+            | null
           date?: string
           description?: string
           destination_account_id?: string | null
           fund_id?: string | null
           id?: string
+          is_credit_card?: boolean
           loan_id?: string | null
           payment_mode?: string | null
           reserve_id?: string | null
@@ -883,6 +959,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
+      credit_card_payment_status: "unpaid" | "partial" | "paid"
       goal_mapping_type: "mf_holding" | "equity"
       loan_status: "active" | "settled"
       loan_type: "external" | "internal"
@@ -1029,6 +1106,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      credit_card_payment_status: ["unpaid", "partial", "paid"],
       goal_mapping_type: ["mf_holding", "equity"],
       loan_status: ["active", "settled"],
       loan_type: ["external", "internal"],
