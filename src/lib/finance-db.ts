@@ -65,6 +65,29 @@ export interface TxRow {
   loan_id?: string | null;
   bucket?: string | null;
   sub_category?: string | null;
+  is_credit_card?: boolean | null;
+  credit_card_paid_amount?: number | null;
+  credit_card_payment_status?: CreditCardStatus | null;
+}
+
+export type CreditCardStatus = "unpaid" | "partial" | "paid";
+
+/** Code of the synthetic (non-bank) credit card account. */
+export const CREDIT_CARD_CODE = "CCARD";
+
+export interface CreditCardPaymentRow {
+  id: string;
+  transaction_id: string;
+  payment_amount: number;
+  paid_from_account_id: string;
+  payment_date: string;
+  payment_transaction_id: string | null;
+  note: string | null;
+}
+
+/** Outstanding amount still owed on a credit card expense. */
+export function ccOutstanding(t: TxRow): number {
+  return Math.max(0, Number(t.amount) - Number(t.credit_card_paid_amount ?? 0));
 }
 
 export type LoanKind = "external" | "internal";
@@ -84,7 +107,7 @@ export interface LoanRow {
 }
 
 export async function fetchAll(userId: string) {
-  const [accounts, categories, funds, reserves, transactions, loans, investments] = await Promise.all([
+  const [accounts, categories, funds, reserves, transactions, loans, investments, ccPayments] = await Promise.all([
     supabase.from("accounts").select("id,code,name,role,opening_balance").order("code"),
     supabase.from("categories").select("id,name,monthly_limit,bucket").order("sort_order"),
     supabase.from("funds").select("id,code,name,account_id,monthly_target,opening_balance").order("code"),
@@ -92,20 +115,43 @@ export async function fetchAll(userId: string) {
     supabase.from("transactions").select("*").order("date", { ascending: false }).order("created_at", { ascending: false }),
     supabase.from("loans" as never).select("*").order("disbursement_date", { ascending: false }),
     supabase.from("investments").select("id,name,active").order("name"),
+    supabase.from("credit_card_payments" as never).select("*").order("payment_date", { ascending: false }),
   ]);
-  const err = accounts.error ?? categories.error ?? funds.error ?? reserves.error ?? transactions.error ?? loans.error ?? investments.error;
+  const err = accounts.error ?? categories.error ?? funds.error ?? reserves.error ?? transactions.error ?? loans.error ?? investments.error ?? ccPayments.error;
   if (err) throw err;
+  const allAccounts = (accounts.data ?? []) as AccountRow[];
   return {
-    accounts: (accounts.data ?? []) as AccountRow[],
+    // Bank accounts only — the credit card is a liability, not a real account.
+    accounts: allAccounts.filter((a) => a.code !== CREDIT_CARD_CODE),
+    creditCardAccount: allAccounts.find((a) => a.code === CREDIT_CARD_CODE) ?? null,
     categories: (categories.data ?? []) as CategoryRow[],
     funds: (funds.data ?? []) as FundRow[],
     reserves: (reserves.data ?? []) as ReserveRow[],
     transactions: (transactions.data ?? []) as TxRow[],
     loans: (loans.data ?? []) as unknown as LoanRow[],
     investments: (investments.data ?? []) as InvestmentRow[],
+    creditCardPayments: (ccPayments.data ?? []) as unknown as CreditCardPaymentRow[],
   };
   // userId is unused here because RLS scopes rows; kept for future composition.
   void userId;
+}
+
+/** Make sure the synthetic credit card account exists for this user. */
+export async function ensureCreditCardAccount(userId: string) {
+  const { count, error } = await supabase
+    .from("accounts")
+    .select("id", { count: "exact", head: true })
+    .eq("code", CREDIT_CARD_CODE);
+  if (error) throw error;
+  if ((count ?? 0) > 0) return;
+  await supabase.from("accounts").insert({
+    user_id: userId,
+    code: CREDIT_CARD_CODE,
+    name: "Credit Card",
+    role: "credit_card",
+    opening_balance: 0,
+    opening_date: new Date().toISOString().slice(0, 10),
+  });
 }
 
 /** Seed the user's canonical setup if their accounts table is empty. */
@@ -114,7 +160,7 @@ export async function seedIfEmpty(userId: string) {
     .from("accounts")
     .select("id", { count: "exact", head: true });
   if (error) throw error;
-  if ((count ?? 0) > 0) return;
+  if ((count ?? 0) > 0) { await ensureCreditCardAccount(userId); return; }
 
   const today = new Date().toISOString().slice(0, 10);
   const { data: acc, error: aErr } = await supabase
@@ -123,6 +169,7 @@ export async function seedIfEmpty(userId: string) {
       { user_id: userId, code: "HDFC", name: "HDFC", role: "Salary · pays commitments & transfers", opening_balance: 0, opening_date: today },
       { user_id: userId, code: "CUB",  name: "CUB",  role: "Daily spending",                          opening_balance: 0, opening_date: today },
       { user_id: userId, code: "SBI",  name: "SBI",  role: "Accumulation · rental + goal funds",       opening_balance: 0, opening_date: today },
+      { user_id: userId, code: CREDIT_CARD_CODE, name: "Credit Card", role: "credit_card",             opening_balance: 0, opening_date: today },
     ])
     .select("id,code");
   if (aErr) throw aErr;
