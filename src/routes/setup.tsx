@@ -75,7 +75,7 @@ function SetupPage() {
     queryFn: async () => {
       await seedIfEmpty(user!.id);
       const [accounts, reserves, funds, categories, investments, plan, recurring] = await Promise.all([
-        supabase.from("accounts").select("id,code,name,opening_balance,opening_date").order("code"),
+        supabase.from("accounts").select("id,code,name,opening_balance,opening_date").neq("code","CCARD").order("code"),
         supabase.from("reserves").select("id,name,amount,monthly_accrual,account_id").order("name"),
         supabase.from("funds").select("id,code,name,opening_balance,monthly_target").order("code"),
         supabase.from("categories").select("id,name,monthly_limit,sort_order,bucket").order("sort_order"),

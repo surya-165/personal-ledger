@@ -44,7 +44,7 @@ function SurplusPage() {
       const [closures, entries, accounts] = await Promise.all([
         fetchClosures(),
         fetchSurplusEntries(),
-        supabase.from("accounts").select("id,code,name,role,opening_balance").order("code"),
+        supabase.from("accounts").select("id,code,name,role,opening_balance").neq("code","CCARD").order("code"),
       ]);
       if (accounts.error) throw accounts.error;
       return { closures, entries, accounts: (accounts.data ?? []) as AccountRow[] };
