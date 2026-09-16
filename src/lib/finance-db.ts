@@ -136,13 +136,31 @@ export async function fetchAll(userId: string) {
   void userId;
 }
 
+/** Make sure the synthetic credit card account exists for this user. */
+export async function ensureCreditCardAccount(userId: string) {
+  const { count, error } = await supabase
+    .from("accounts")
+    .select("id", { count: "exact", head: true })
+    .eq("code", CREDIT_CARD_CODE);
+  if (error) throw error;
+  if ((count ?? 0) > 0) return;
+  await supabase.from("accounts").insert({
+    user_id: userId,
+    code: CREDIT_CARD_CODE,
+    name: "Credit Card",
+    role: "credit_card",
+    opening_balance: 0,
+    opening_date: new Date().toISOString().slice(0, 10),
+  });
+}
+
 /** Seed the user's canonical setup if their accounts table is empty. */
 export async function seedIfEmpty(userId: string) {
   const { count, error } = await supabase
     .from("accounts")
     .select("id", { count: "exact", head: true });
   if (error) throw error;
-  if ((count ?? 0) > 0) return;
+  if ((count ?? 0) > 0) { await ensureCreditCardAccount(userId); return; }
 
   const today = new Date().toISOString().slice(0, 10);
   const { data: acc, error: aErr } = await supabase
