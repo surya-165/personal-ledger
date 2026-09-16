@@ -65,6 +65,29 @@ export interface TxRow {
   loan_id?: string | null;
   bucket?: string | null;
   sub_category?: string | null;
+  is_credit_card?: boolean | null;
+  credit_card_paid_amount?: number | null;
+  credit_card_payment_status?: CreditCardStatus | null;
+}
+
+export type CreditCardStatus = "unpaid" | "partial" | "paid";
+
+/** Code of the synthetic (non-bank) credit card account. */
+export const CREDIT_CARD_CODE = "CCARD";
+
+export interface CreditCardPaymentRow {
+  id: string;
+  transaction_id: string;
+  payment_amount: number;
+  paid_from_account_id: string;
+  payment_date: string;
+  payment_transaction_id: string | null;
+  note: string | null;
+}
+
+/** Outstanding amount still owed on a credit card expense. */
+export function ccOutstanding(t: TxRow): number {
+  return Math.max(0, Number(t.amount) - Number(t.credit_card_paid_amount ?? 0));
 }
 
 export type LoanKind = "external" | "internal";
