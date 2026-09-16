@@ -169,6 +169,7 @@ export async function seedIfEmpty(userId: string) {
       { user_id: userId, code: "HDFC", name: "HDFC", role: "Salary · pays commitments & transfers", opening_balance: 0, opening_date: today },
       { user_id: userId, code: "CUB",  name: "CUB",  role: "Daily spending",                          opening_balance: 0, opening_date: today },
       { user_id: userId, code: "SBI",  name: "SBI",  role: "Accumulation · rental + goal funds",       opening_balance: 0, opening_date: today },
+      { user_id: userId, code: CREDIT_CARD_CODE, name: "Credit Card", role: "credit_card",             opening_balance: 0, opening_date: today },
     ])
     .select("id,code");
   if (aErr) throw aErr;
