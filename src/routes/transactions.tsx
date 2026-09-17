@@ -10,6 +10,7 @@ import {
   formatINR,
   txTypeLabel,
   computeAccountBalances,
+  ccOutstanding,
   BUCKETS,
   bucketTxType,
   nonSpendingTypes,
@@ -17,11 +18,16 @@ import {
   type TxType,
   type AccountRow,
   type CategoryRow,
+  type CreditCardPaymentRow,
   type FundRow,
   type InvestmentRow,
   type ReserveRow,
   type TxRow,
 } from "@/lib/finance-db";
+import {
+  CreditCardPaymentDialog,
+  deleteCreditCardTransaction,
+} from "@/components/finance/credit-card-payment-dialog";
 import { PageHeader } from "@/components/finance/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -88,13 +94,37 @@ function TransactionsPage() {
   const funds = data?.funds ?? [];
   const reserves = data?.reserves ?? [];
   const investments = data?.investments ?? [];
+  const creditCardAccount = data?.creditCardAccount ?? null;
+  const creditCardPayments = data?.creditCardPayments ?? [];
 
-  // Account card filters default to all accounts once data loads.
+  // Cards shown as filters: the three banks plus the credit card.
+  const filterCards = useMemo(
+    () => (creditCardAccount ? [...accounts, creditCardAccount] : accounts),
+    [accounts, creditCardAccount],
+  );
+
+  const ccTotalOutstanding = useMemo(
+    () => transactions
+      .filter((t) => t.is_credit_card && t.credit_card_payment_status !== "paid")
+      .reduce((s, t) => s + ccOutstanding(t), 0),
+    [transactions],
+  );
+
+  // Payments grouped by the card expense they belong to.
+  const paymentsByTx = useMemo(() => {
+    const m: Record<string, CreditCardPaymentRow[]> = {};
+    for (const p of creditCardPayments) (m[p.transaction_id] ??= []).push(p);
+    return m;
+  }, [creditCardPayments]);
+
+  const [payingTx, setPayingTx] = useState<TxRow | null>(null);
+
+  // Account card filters default to all cards once data loads.
   useEffect(() => {
-    if (accounts.length > 0 && accountFilter.length === 0) {
-      setAccountFilter(accounts.map((a) => a.id));
+    if (filterCards.length > 0 && accountFilter.length === 0) {
+      setAccountFilter(filterCards.map((a) => a.id));
     }
-  }, [accounts, accountFilter.length]);
+  }, [filterCards, accountFilter.length]);
 
   const toggleAccount = (id: string) => {
     setAccountFilter((prev) => {
@@ -161,21 +191,36 @@ function TransactionsPage() {
     });
   }, [transactions, from, to, typeFilter, accountFilter, bucketFilter, subFilter, subLabel]);
 
-  const accountFilterActive = accountFilter.length > 0 && accountFilter.length < accounts.length;
+  const accountFilterActive = accountFilter.length > 0 && accountFilter.length < filterCards.length;
   const hasAnyFilter =
     !!from || !!to || typeFilter.length > 0 || accountFilterActive || bucketFilter.length > 0 || subFilter.length > 0;
   const clearAll = () => {
     setFrom(""); setTo("");
-    setTypeFilter([]); setAccountFilter(accounts.map((a) => a.id)); setBucketFilter([]); setSubFilter([]);
+    setTypeFilter([]); setAccountFilter(filterCards.map((a) => a.id)); setBucketFilter([]); setSubFilter([]);
   };
 
+  const pendingPayments = pendingDelete ? (paymentsByTx[pendingDelete.id] ?? []) : [];
+  const pendingPaid = pendingPayments.reduce((s, p) => s + Number(p.payment_amount), 0);
 
   async function confirmDelete() {
     if (!pendingDelete) return;
     setDeleting(true);
-    const { error } = await supabase.from("transactions").delete().eq("id", pendingDelete.id);
+    try {
+      if (pendingDelete.is_credit_card) {
+        const payTxIds = pendingPayments
+          .map((p) => p.payment_transaction_id)
+          .filter((x): x is string => !!x);
+        await deleteCreditCardTransaction(pendingDelete.id, payTxIds);
+      } else {
+        const { error } = await supabase.from("transactions").delete().eq("id", pendingDelete.id);
+        if (error) throw error;
+      }
+    } catch (e) {
+      setDeleting(false);
+      toast.error(e instanceof Error ? e.message : "Could not delete the transaction");
+      return;
+    }
     setDeleting(false);
-    if (error) { toast.error(error.message); return; }
     // Optimistic cache update
     qc.setQueryData<Awaited<ReturnType<typeof fetchAll>>>(["finance", user!.id], (prev) =>
       prev ? { ...prev, transactions: prev.transactions.filter((x) => x.id !== pendingDelete.id) } : prev,
@@ -189,7 +234,7 @@ function TransactionsPage() {
     return <div className="text-sm text-muted-foreground">Loading…</div>;
   }
 
-  const accountById = Object.fromEntries(accounts.map((a) => [a.id, a]));
+  const accountById = Object.fromEntries(filterCards.map((a) => [a.id, a]));
 
   return (
     <div>
@@ -202,6 +247,7 @@ function TransactionsPage() {
             </DialogTrigger>
             <AddTransactionDialog
               accounts={accounts}
+              creditCardAccount={creditCardAccount}
               categories={categories}
               funds={funds}
               reserves={reserves}
@@ -223,11 +269,12 @@ function TransactionsPage() {
         </div>
       </div>
 
-      {accounts.length > 0 ? (
+      {filterCards.length > 0 ? (
         <div className="mb-5">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {accounts.map((a) => {
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {filterCards.map((a) => {
               const selected = accountFilter.includes(a.id);
+              const isCard = a.id === creditCardAccount?.id;
               return (
                 <button
                   key={a.id}
@@ -236,7 +283,9 @@ function TransactionsPage() {
                   className={
                     "relative text-left w-full min-w-0 rounded-xl border transition-all " +
                     (selected
-                      ? "border-primary bg-primary/10 shadow-sm"
+                      ? isCard
+                        ? "border-warning bg-warning/10 shadow-sm"
+                        : "border-primary bg-primary/10 shadow-sm"
                       : "border-border bg-card opacity-60 hover:opacity-80")
                   }
                 >
@@ -244,22 +293,31 @@ function TransactionsPage() {
                     <div className="flex items-start justify-between">
                       <div className="text-xs text-muted-foreground truncate">{a.name}</div>
                       {selected ? (
-                        <div className="rounded-full bg-primary text-primary-foreground p-0.5">
+                        <div className={
+                          "rounded-full p-0.5 " +
+                          (isCard ? "bg-warning text-background" : "bg-primary text-primary-foreground")
+                        }>
                           <Check className="h-3 w-3" />
                         </div>
                       ) : null}
                     </div>
-                    <div className="text-lg font-semibold tabular-nums break-words">{formatINR(balances[a.id] ?? 0)}</div>
-                    <div className="text-[11px] text-muted-foreground mt-0.5">Current balance</div>
+                    <div className={
+                      "text-lg font-semibold tabular-nums break-words " + (isCard ? "text-warning" : "")
+                    }>
+                      {formatINR(isCard ? ccTotalOutstanding : (balances[a.id] ?? 0))}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5">
+                      {isCard ? "Outstanding balance" : "Current balance"}
+                    </div>
                   </div>
                 </button>
               );
             })}
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
-            {accountFilter.length === 0 || accountFilter.length === accounts.length
+            {accountFilter.length === 0 || accountFilter.length === filterCards.length
               ? "Showing all accounts"
-              : `Showing: ${accounts.filter((a) => accountFilter.includes(a.id)).map((a) => a.name).join(", ")}`}
+              : `Showing: ${filterCards.filter((a) => accountFilter.includes(a.id)).map((a) => a.name).join(", ")}`}
           </div>
         </div>
       ) : null}
@@ -344,7 +402,42 @@ function TransactionsPage() {
                         {txTypeLabel[t.type]}
                       </Badge>
                     </td>
-                    <td className="px-5 py-3.5">{accountById[t.account_id]?.name ?? ""}</td>
+                    <td className="px-5 py-3.5">
+                      {t.is_credit_card ? (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="whitespace-nowrap">Credit Card</span>
+                            <Badge
+                              variant="outline"
+                              className={
+                                "font-normal whitespace-nowrap " +
+                                (t.credit_card_payment_status === "paid"
+                                  ? "border-success/40 bg-success/10 text-success"
+                                  : "border-warning/40 bg-warning/10 text-warning")
+                              }
+                            >
+                              {t.credit_card_payment_status === "paid"
+                                ? "Paid"
+                                : t.credit_card_payment_status === "partial"
+                                  ? "Partial"
+                                  : "Unpaid"}
+                            </Badge>
+                          </div>
+                          {t.credit_card_payment_status && t.credit_card_payment_status !== "unpaid" ? (
+                            <div className="text-[11px] text-muted-foreground">
+                              {t.credit_card_payment_status === "paid"
+                                ? "Paid in full"
+                                : `Paid ${formatINR(Number(t.credit_card_paid_amount ?? 0))} of ${formatINR(Number(t.amount))}`}
+                              {paidFromText(paymentsByTx[t.id] ?? [], accountById)
+                                ? ` · from ${paidFromText(paymentsByTx[t.id] ?? [], accountById)}`
+                                : ""}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        accountById[t.account_id]?.name ?? ""
+                      )}
+                    </td>
                     <td className="px-5 py-3.5 text-muted-foreground whitespace-nowrap">
                       {t.bucket ? t.bucket : "—"}
                     </td>
@@ -358,7 +451,17 @@ function TransactionsPage() {
                       {inflow ? "+" : isInternal ? "" : "−"}{formatINR(Number(t.amount))}
                     </td>
                     <td className="pr-3 py-3.5 w-8">
-                      <div className="flex items-center gap-2 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-2 justify-end">
+                        {t.is_credit_card && t.credit_card_payment_status !== "paid" ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs whitespace-nowrap"
+                            onClick={() => setPayingTx(t)}
+                          >
+                            Log payment
+                          </Button>
+                        ) : null}
                         <button
                           aria-label="Edit transaction"
                           onClick={() => setEditing(t)}
@@ -395,6 +498,7 @@ function TransactionsPage() {
           <AddTransactionDialog
             key={editing.id}
             accounts={accounts}
+            creditCardAccount={creditCardAccount}
             categories={categories}
             funds={funds}
             reserves={reserves}
@@ -417,7 +521,10 @@ function TransactionsPage() {
               {pendingDelete ? (
                 <>
                   {pendingDelete.description || txTypeLabel[pendingDelete.type]} on{" "}
-                  {formatDateLong(pendingDelete.date)} — {formatINR(Number(pendingDelete.amount))}. This cannot be undone.
+                  {formatDateLong(pendingDelete.date)} — {formatINR(Number(pendingDelete.amount))}.{" "}
+                  {pendingDelete.is_credit_card && pendingPaid > 0
+                    ? `This transaction has ${formatINR(pendingPaid)} in payments logged. Deleting it will also remove those payment records and reverse the account balance adjustments. Proceed?`
+                    : "This cannot be undone."}
                 </>
               ) : null}
             </AlertDialogDescription>
@@ -434,8 +541,37 @@ function TransactionsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <CreditCardPaymentDialog
+        tx={payingTx}
+        accounts={accounts}
+        creditCardAccountId={creditCardAccount?.id ?? null}
+        userId={user!.id}
+        onClose={() => setPayingTx(null)}
+        onSaved={() => {
+          setPayingTx(null);
+          qc.invalidateQueries({ queryKey: ["finance", user!.id] });
+        }}
+      />
     </div>
   );
+}
+
+/** "HDFC ₹500, CUB ₹200" — which accounts paid this card expense. */
+export function paidFromText(
+  payments: CreditCardPaymentRow[],
+  accountById: Record<string, { name: string }>,
+): string {
+  const byAcct: Record<string, number> = {};
+  for (const p of payments) {
+    byAcct[p.paid_from_account_id] = (byAcct[p.paid_from_account_id] ?? 0) + Number(p.payment_amount);
+  }
+  const entries = Object.entries(byAcct);
+  if (entries.length === 0) return "";
+  if (entries.length === 1) return accountById[entries[0][0]]?.name ?? "";
+  return entries
+    .map(([id, amt]) => `${accountById[id]?.name ?? ""} ${formatINR(amt)}`)
+    .join(", ");
 }
 
 function formatDateLong(iso: string) {
@@ -553,9 +689,10 @@ function todayISO() {
 }
 
 function AddTransactionDialog({
-  accounts, categories, funds, reserves, investments, userId, onSaved, editing,
+  accounts, creditCardAccount, categories, funds, reserves, investments, userId, onSaved, editing,
 }: {
   accounts: AccountRow[];
+  creditCardAccount?: AccountRow | null;
   categories: CategoryRow[];
   funds: FundRow[];
   reserves: ReserveRow[];
