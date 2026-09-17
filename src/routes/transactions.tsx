@@ -521,7 +521,10 @@ function TransactionsPage() {
               {pendingDelete ? (
                 <>
                   {pendingDelete.description || txTypeLabel[pendingDelete.type]} on{" "}
-                  {formatDateLong(pendingDelete.date)} — {formatINR(Number(pendingDelete.amount))}. This cannot be undone.
+                  {formatDateLong(pendingDelete.date)} — {formatINR(Number(pendingDelete.amount))}.{" "}
+                  {pendingDelete.is_credit_card && pendingPaid > 0
+                    ? `This transaction has ${formatINR(pendingPaid)} in payments logged. Deleting it will also remove those payment records and reverse the account balance adjustments. Proceed?`
+                    : "This cannot be undone."}
                 </>
               ) : null}
             </AlertDialogDescription>
