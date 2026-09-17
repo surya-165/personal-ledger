@@ -402,7 +402,42 @@ function TransactionsPage() {
                         {txTypeLabel[t.type]}
                       </Badge>
                     </td>
-                    <td className="px-5 py-3.5">{accountById[t.account_id]?.name ?? ""}</td>
+                    <td className="px-5 py-3.5">
+                      {t.is_credit_card ? (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="whitespace-nowrap">Credit Card</span>
+                            <Badge
+                              variant="outline"
+                              className={
+                                "font-normal whitespace-nowrap " +
+                                (t.credit_card_payment_status === "paid"
+                                  ? "border-success/40 bg-success/10 text-success"
+                                  : "border-warning/40 bg-warning/10 text-warning")
+                              }
+                            >
+                              {t.credit_card_payment_status === "paid"
+                                ? "Paid"
+                                : t.credit_card_payment_status === "partial"
+                                  ? "Partial"
+                                  : "Unpaid"}
+                            </Badge>
+                          </div>
+                          {t.credit_card_payment_status && t.credit_card_payment_status !== "unpaid" ? (
+                            <div className="text-[11px] text-muted-foreground">
+                              {t.credit_card_payment_status === "paid"
+                                ? "Paid in full"
+                                : `Paid ${formatINR(Number(t.credit_card_paid_amount ?? 0))} of ${formatINR(Number(t.amount))}`}
+                              {paidFromText(paymentsByTx[t.id] ?? [], accountById)
+                                ? ` · from ${paidFromText(paymentsByTx[t.id] ?? [], accountById)}`
+                                : ""}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        accountById[t.account_id]?.name ?? ""
+                      )}
+                    </td>
                     <td className="px-5 py-3.5 text-muted-foreground whitespace-nowrap">
                       {t.bucket ? t.bucket : "—"}
                     </td>
