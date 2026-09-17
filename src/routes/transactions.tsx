@@ -689,9 +689,10 @@ function todayISO() {
 }
 
 function AddTransactionDialog({
-  accounts, categories, funds, reserves, investments, userId, onSaved, editing,
+  accounts, creditCardAccount, categories, funds, reserves, investments, userId, onSaved, editing,
 }: {
   accounts: AccountRow[];
+  creditCardAccount?: AccountRow | null;
   categories: CategoryRow[];
   funds: FundRow[];
   reserves: ReserveRow[];
