@@ -541,8 +541,37 @@ function TransactionsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <CreditCardPaymentDialog
+        tx={payingTx}
+        accounts={accounts}
+        creditCardAccountId={creditCardAccount?.id ?? null}
+        userId={user!.id}
+        onClose={() => setPayingTx(null)}
+        onSaved={() => {
+          setPayingTx(null);
+          qc.invalidateQueries({ queryKey: ["finance", user!.id] });
+        }}
+      />
     </div>
   );
+}
+
+/** "HDFC ₹500, CUB ₹200" — which accounts paid this card expense. */
+export function paidFromText(
+  payments: CreditCardPaymentRow[],
+  accountById: Record<string, { name: string }>,
+): string {
+  const byAcct: Record<string, number> = {};
+  for (const p of payments) {
+    byAcct[p.paid_from_account_id] = (byAcct[p.paid_from_account_id] ?? 0) + Number(p.payment_amount);
+  }
+  const entries = Object.entries(byAcct);
+  if (entries.length === 0) return "";
+  if (entries.length === 1) return accountById[entries[0][0]]?.name ?? "";
+  return entries
+    .map(([id, amt]) => `${accountById[id]?.name ?? ""} ${formatINR(amt)}`)
+    .join(", ");
 }
 
 function formatDateLong(iso: string) {
