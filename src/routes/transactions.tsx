@@ -10,6 +10,7 @@ import {
   formatINR,
   txTypeLabel,
   computeAccountBalances,
+  ccOutstanding,
   BUCKETS,
   bucketTxType,
   nonSpendingTypes,
@@ -17,11 +18,16 @@ import {
   type TxType,
   type AccountRow,
   type CategoryRow,
+  type CreditCardPaymentRow,
   type FundRow,
   type InvestmentRow,
   type ReserveRow,
   type TxRow,
 } from "@/lib/finance-db";
+import {
+  CreditCardPaymentDialog,
+  deleteCreditCardTransaction,
+} from "@/components/finance/credit-card-payment-dialog";
 import { PageHeader } from "@/components/finance/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
