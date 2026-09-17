@@ -94,13 +94,37 @@ function TransactionsPage() {
   const funds = data?.funds ?? [];
   const reserves = data?.reserves ?? [];
   const investments = data?.investments ?? [];
+  const creditCardAccount = data?.creditCardAccount ?? null;
+  const creditCardPayments = data?.creditCardPayments ?? [];
 
-  // Account card filters default to all accounts once data loads.
+  // Cards shown as filters: the three banks plus the credit card.
+  const filterCards = useMemo(
+    () => (creditCardAccount ? [...accounts, creditCardAccount] : accounts),
+    [accounts, creditCardAccount],
+  );
+
+  const ccTotalOutstanding = useMemo(
+    () => transactions
+      .filter((t) => t.is_credit_card && t.credit_card_payment_status !== "paid")
+      .reduce((s, t) => s + ccOutstanding(t), 0),
+    [transactions],
+  );
+
+  // Payments grouped by the card expense they belong to.
+  const paymentsByTx = useMemo(() => {
+    const m: Record<string, CreditCardPaymentRow[]> = {};
+    for (const p of creditCardPayments) (m[p.transaction_id] ??= []).push(p);
+    return m;
+  }, [creditCardPayments]);
+
+  const [payingTx, setPayingTx] = useState<TxRow | null>(null);
+
+  // Account card filters default to all cards once data loads.
   useEffect(() => {
-    if (accounts.length > 0 && accountFilter.length === 0) {
-      setAccountFilter(accounts.map((a) => a.id));
+    if (filterCards.length > 0 && accountFilter.length === 0) {
+      setAccountFilter(filterCards.map((a) => a.id));
     }
-  }, [accounts, accountFilter.length]);
+  }, [filterCards, accountFilter.length]);
 
   const toggleAccount = (id: string) => {
     setAccountFilter((prev) => {
