@@ -191,21 +191,36 @@ function TransactionsPage() {
     });
   }, [transactions, from, to, typeFilter, accountFilter, bucketFilter, subFilter, subLabel]);
 
-  const accountFilterActive = accountFilter.length > 0 && accountFilter.length < accounts.length;
+  const accountFilterActive = accountFilter.length > 0 && accountFilter.length < filterCards.length;
   const hasAnyFilter =
     !!from || !!to || typeFilter.length > 0 || accountFilterActive || bucketFilter.length > 0 || subFilter.length > 0;
   const clearAll = () => {
     setFrom(""); setTo("");
-    setTypeFilter([]); setAccountFilter(accounts.map((a) => a.id)); setBucketFilter([]); setSubFilter([]);
+    setTypeFilter([]); setAccountFilter(filterCards.map((a) => a.id)); setBucketFilter([]); setSubFilter([]);
   };
 
+  const pendingPayments = pendingDelete ? (paymentsByTx[pendingDelete.id] ?? []) : [];
+  const pendingPaid = pendingPayments.reduce((s, p) => s + Number(p.payment_amount), 0);
 
   async function confirmDelete() {
     if (!pendingDelete) return;
     setDeleting(true);
-    const { error } = await supabase.from("transactions").delete().eq("id", pendingDelete.id);
+    try {
+      if (pendingDelete.is_credit_card) {
+        const payTxIds = pendingPayments
+          .map((p) => p.payment_transaction_id)
+          .filter((x): x is string => !!x);
+        await deleteCreditCardTransaction(pendingDelete.id, payTxIds);
+      } else {
+        const { error } = await supabase.from("transactions").delete().eq("id", pendingDelete.id);
+        if (error) throw error;
+      }
+    } catch (e) {
+      setDeleting(false);
+      toast.error(e instanceof Error ? e.message : "Could not delete the transaction");
+      return;
+    }
     setDeleting(false);
-    if (error) { toast.error(error.message); return; }
     // Optimistic cache update
     qc.setQueryData<Awaited<ReturnType<typeof fetchAll>>>(["finance", user!.id], (prev) =>
       prev ? { ...prev, transactions: prev.transactions.filter((x) => x.id !== pendingDelete.id) } : prev,
@@ -219,7 +234,7 @@ function TransactionsPage() {
     return <div className="text-sm text-muted-foreground">Loading…</div>;
   }
 
-  const accountById = Object.fromEntries(accounts.map((a) => [a.id, a]));
+  const accountById = Object.fromEntries(filterCards.map((a) => [a.id, a]));
 
   return (
     <div>
