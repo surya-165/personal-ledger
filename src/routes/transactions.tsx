@@ -451,7 +451,17 @@ function TransactionsPage() {
                       {inflow ? "+" : isInternal ? "" : "−"}{formatINR(Number(t.amount))}
                     </td>
                     <td className="pr-3 py-3.5 w-8">
-                      <div className="flex items-center gap-2 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-2 justify-end">
+                        {t.is_credit_card && t.credit_card_payment_status !== "paid" ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs whitespace-nowrap"
+                            onClick={() => setPayingTx(t)}
+                          >
+                            Log payment
+                          </Button>
+                        ) : null}
                         <button
                           aria-label="Edit transaction"
                           onClick={() => setEditing(t)}
