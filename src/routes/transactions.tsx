@@ -498,6 +498,7 @@ function TransactionsPage() {
           <AddTransactionDialog
             key={editing.id}
             accounts={accounts}
+            creditCardAccount={creditCardAccount}
             categories={categories}
             funds={funds}
             reserves={reserves}
