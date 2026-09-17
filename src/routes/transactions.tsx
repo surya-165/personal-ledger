@@ -247,6 +247,7 @@ function TransactionsPage() {
             </DialogTrigger>
             <AddTransactionDialog
               accounts={accounts}
+              creditCardAccount={creditCardAccount}
               categories={categories}
               funds={funds}
               reserves={reserves}
