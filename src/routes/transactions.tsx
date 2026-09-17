@@ -269,11 +269,12 @@ function TransactionsPage() {
         </div>
       </div>
 
-      {accounts.length > 0 ? (
+      {filterCards.length > 0 ? (
         <div className="mb-5">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {accounts.map((a) => {
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {filterCards.map((a) => {
               const selected = accountFilter.includes(a.id);
+              const isCard = a.id === creditCardAccount?.id;
               return (
                 <button
                   key={a.id}
@@ -282,7 +283,9 @@ function TransactionsPage() {
                   className={
                     "relative text-left w-full min-w-0 rounded-xl border transition-all " +
                     (selected
-                      ? "border-primary bg-primary/10 shadow-sm"
+                      ? isCard
+                        ? "border-warning bg-warning/10 shadow-sm"
+                        : "border-primary bg-primary/10 shadow-sm"
                       : "border-border bg-card opacity-60 hover:opacity-80")
                   }
                 >
@@ -290,22 +293,31 @@ function TransactionsPage() {
                     <div className="flex items-start justify-between">
                       <div className="text-xs text-muted-foreground truncate">{a.name}</div>
                       {selected ? (
-                        <div className="rounded-full bg-primary text-primary-foreground p-0.5">
+                        <div className={
+                          "rounded-full p-0.5 " +
+                          (isCard ? "bg-warning text-background" : "bg-primary text-primary-foreground")
+                        }>
                           <Check className="h-3 w-3" />
                         </div>
                       ) : null}
                     </div>
-                    <div className="text-lg font-semibold tabular-nums break-words">{formatINR(balances[a.id] ?? 0)}</div>
-                    <div className="text-[11px] text-muted-foreground mt-0.5">Current balance</div>
+                    <div className={
+                      "text-lg font-semibold tabular-nums break-words " + (isCard ? "text-warning" : "")
+                    }>
+                      {formatINR(isCard ? ccTotalOutstanding : (balances[a.id] ?? 0))}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5">
+                      {isCard ? "Outstanding balance" : "Current balance"}
+                    </div>
                   </div>
                 </button>
               );
             })}
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
-            {accountFilter.length === 0 || accountFilter.length === accounts.length
+            {accountFilter.length === 0 || accountFilter.length === filterCards.length
               ? "Showing all accounts"
-              : `Showing: ${accounts.filter((a) => accountFilter.includes(a.id)).map((a) => a.name).join(", ")}`}
+              : `Showing: ${filterCards.filter((a) => accountFilter.includes(a.id)).map((a) => a.name).join(", ")}`}
           </div>
         </div>
       ) : null}
