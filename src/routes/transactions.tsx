@@ -58,6 +58,15 @@ export const Route = createFileRoute("/transactions")({
   component: TransactionsPage,
 });
 
+function formatLatestDate(dateStr: string) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 function TransactionsPage() {
   const { session, user, loading } = useAuth();
   const navigate = useNavigate();
