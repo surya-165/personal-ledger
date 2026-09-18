@@ -381,6 +381,13 @@ function TransactionsPage() {
 
       <Card>
         <CardContent className="p-0 overflow-x-auto">
+          {latestTxDate && (
+            <div className="flex items-center gap-2 px-5 py-2.5 border-b border-border bg-muted/30 text-xs text-muted-foreground">
+              <CalendarIcon className="h-3.5 w-3.5" />
+              Latest transaction log:
+              <span className="font-medium text-foreground">{formatLatestDate(latestTxDate)}</span>
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
