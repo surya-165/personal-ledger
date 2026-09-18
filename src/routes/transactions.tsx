@@ -58,6 +58,15 @@ export const Route = createFileRoute("/transactions")({
   component: TransactionsPage,
 });
 
+function formatLatestDate(dateStr: string) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 function TransactionsPage() {
   const { session, user, loading } = useAuth();
   const navigate = useNavigate();
@@ -190,6 +199,11 @@ function TransactionsPage() {
       return true;
     });
   }, [transactions, from, to, typeFilter, accountFilter, bucketFilter, subFilter, subLabel]);
+
+  const latestTxDate = useMemo(() => {
+    // transactions are fetched date-descending; the first row is the latest log.
+    return transactions[0]?.date ?? null;
+  }, [transactions]);
 
   const accountFilterActive = accountFilter.length > 0 && accountFilter.length < filterCards.length;
   const hasAnyFilter =
@@ -367,6 +381,13 @@ function TransactionsPage() {
 
       <Card>
         <CardContent className="p-0 overflow-x-auto">
+          {latestTxDate && (
+            <div className="flex items-center gap-2 px-5 py-2.5 border-b border-border bg-muted/30 text-xs text-muted-foreground">
+              <CalendarIcon className="h-3.5 w-3.5" />
+              Latest transaction log:
+              <span className="font-medium text-foreground">{formatLatestDate(latestTxDate)}</span>
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
