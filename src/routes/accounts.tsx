@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -8,9 +8,13 @@ import {
   computeAccountBalances,
   computeFundBalance,
   computeReserveBalance,
+  ccOutstanding,
+  type TxRow,
 } from "@/lib/finance-db";
 import { PageHeader } from "@/components/finance/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CreditCardPaymentDialog } from "@/components/finance/credit-card-payment-dialog";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 export const Route = createFileRoute("/accounts")({
   head: () => ({
