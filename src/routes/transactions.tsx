@@ -200,6 +200,11 @@ function TransactionsPage() {
     });
   }, [transactions, from, to, typeFilter, accountFilter, bucketFilter, subFilter, subLabel]);
 
+  const latestTxDate = useMemo(() => {
+    // transactions are fetched date-descending; the first row is the latest log.
+    return transactions[0]?.date ?? null;
+  }, [transactions]);
+
   const accountFilterActive = accountFilter.length > 0 && accountFilter.length < filterCards.length;
   const hasAnyFilter =
     !!from || !!to || typeFilter.length > 0 || accountFilterActive || bucketFilter.length > 0 || subFilter.length > 0;
