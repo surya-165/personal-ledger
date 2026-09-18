@@ -758,6 +758,8 @@ function AddTransactionDialog({
     if (!date) { toast.error("Pick a date"); return; }
     if (mode === "bucket" && !bucket) { toast.error("Pick a bucket"); return; }
 
+    const isCreditCard = type === "expense" && creditCardAccount != null && accountId === creditCardAccount.id;
+
     const row: Record<string, unknown> = {
       user_id: userId,
       date,
@@ -772,6 +774,9 @@ function AddTransactionDialog({
       reserve_id: null,
       bucket: mode === "bucket" ? bucket : null,
       sub_category: null,
+      is_credit_card: isCreditCard,
+      credit_card_paid_amount: isCreditCard ? Number(editing?.credit_card_paid_amount ?? 0) : 0,
+      credit_card_payment_status: isCreditCard ? (editing?.credit_card_payment_status ?? "unpaid") : null,
     };
 
     if (mode === "bucket") {
@@ -938,6 +943,9 @@ function AddTransactionDialog({
               <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
               <SelectContent>
                 {accounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+                {type === "expense" && creditCardAccount ? (
+                  <SelectItem value={creditCardAccount.id}>Credit Card</SelectItem>
+                ) : null}
               </SelectContent>
             </Select>
           </Field>
