@@ -42,6 +42,9 @@ function AccountsPage() {
     queryFn: () => fetchAll(user!.id),
   });
 
+  const [payingTx, setPayingTx] = useState<TxRow | null>(null);
+  const [ccListOpen, setCcListOpen] = useState(false);
+
   const ym = currentMonthKey();
   const monthLabel = new Date(ym + "-01").toLocaleDateString("en-IN", {
     month: "long",
@@ -195,6 +198,102 @@ function AccountsPage() {
         })}
       </div>
       )}
+
+      {cc ? (
+        <Card className="mt-6 border-warning/50 bg-warning/5">
+          <CardHeader>
+            <div className="flex items-baseline justify-between">
+              <CardTitle className="text-base font-medium">Credit Card</CardTitle>
+              <span className="text-xs text-muted-foreground">Liability</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-semibold tabular-nums tracking-tight text-warning">
+              {formatINR(ccOutstandingTotal)}
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              Outstanding balance · money owed
+            </div>
+            <div className="mt-3 space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">
+                  {unpaidTxs.length} unpaid transaction{unpaidTxs.length === 1 ? "" : "s"}
+                </span>
+                <span className="tabular-nums font-medium">{formatINR(unpaidTotal)} total</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">
+                  {partialTxs.length} partially paid
+                </span>
+                <span className="tabular-nums font-medium">{formatINR(partialRemaining)} remaining</span>
+              </div>
+            </div>
+            <div className="mt-5 border-t border-border pt-4">
+              <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+                This month
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <div className="text-xs text-muted-foreground">Spent on card</div>
+                  <div className="tabular-nums font-medium">{formatINR(ccSpentMonth)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Paid this month</div>
+                  <div className="tabular-nums font-medium text-success">{formatINR(ccPaidMonth)}</div>
+                </div>
+              </div>
+            </div>
+            {openTxs.length > 0 ? (
+              <div className="mt-5 border-t border-border pt-4">
+                <button
+                  type="button"
+                  onClick={() => setCcListOpen((o) => !o)}
+                  className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {ccListOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                  Unpaid list ({openTxs.length})
+                </button>
+                {ccListOpen ? (
+                  <ul className="mt-3 space-y-2.5">
+                    {openTxs.map((t) => (
+                      <li key={t.id} className="flex items-center justify-between gap-3 text-sm">
+                        <div className="min-w-0">
+                          <div className="truncate font-medium">{t.description || "Card expense"}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {t.date} · {formatINR(Number(t.amount))}
+                            {Number(t.credit_card_paid_amount ?? 0) > 0
+                              ? ` · paid ${formatINR(Number(t.credit_card_paid_amount))}`
+                              : ""}
+                            {" · "}outstanding {formatINR(ccOutstanding(t))}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setPayingTx(t)}
+                          className="shrink-0 rounded-md border border-input px-2.5 py-1 text-xs hover:bg-accent/40 transition-colors"
+                        >
+                          Log payment
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {user ? (
+        <CreditCardPaymentDialog
+          tx={payingTx}
+          accounts={q.data?.accounts ?? []}
+          creditCardAccountId={cc?.id ?? null}
+          userId={user.id}
+          onClose={() => setPayingTx(null)}
+          onSaved={() => { setPayingTx(null); q.refetch(); }}
+        />
+      ) : null}
     </div>
   );
 }
