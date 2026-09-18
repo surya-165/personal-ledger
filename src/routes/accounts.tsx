@@ -87,6 +87,22 @@ function AccountsPage() {
 
   if (loading || !session) return <div className="text-sm text-muted-foreground">Loading…</div>;
 
+  const cc = q.data?.creditCardAccount ?? null;
+  const ccPayments = q.data?.creditCardPayments ?? [];
+  const ccTxs = (q.data?.transactions ?? []).filter((t) => t.is_credit_card);
+  const openTxs = ccTxs.filter((t) => t.credit_card_payment_status !== "paid");
+  const unpaidTxs = openTxs.filter((t) => t.credit_card_payment_status === "unpaid");
+  const partialTxs = openTxs.filter((t) => t.credit_card_payment_status === "partial");
+  const ccOutstandingTotal = openTxs.reduce((s, t) => s + ccOutstanding(t), 0);
+  const unpaidTotal = unpaidTxs.reduce((s, t) => s + Number(t.amount), 0);
+  const partialRemaining = partialTxs.reduce((s, t) => s + ccOutstanding(t), 0);
+  const ccSpentMonth = ccTxs
+    .filter((t) => t.date.startsWith(ym))
+    .reduce((s, t) => s + Number(t.amount), 0);
+  const ccPaidMonth = ccPayments
+    .filter((p) => p.payment_date.startsWith(ym))
+    .reduce((s, p) => s + Number(p.payment_amount), 0);
+
   return (
     <div>
       <PageHeader
