@@ -80,6 +80,8 @@ export interface CloseBucketInput {
   planned: number;
   actual: number;
   surplus: number;
+  /** Amount actually transferred; defaults to surplus but user-editable. */
+  transferAmount?: number;
   sourceAccountId: string | null;
   destinationAccountId: string | null;
   note: string;
@@ -111,8 +113,10 @@ export async function closeMonth(opts: {
     const entries: Record<string, unknown>[] = [];
     for (const b of buckets) {
       let txId: string | null = null;
+      const amt = b.transferAmount ?? b.surplus;
       const needsTransfer =
         b.surplus > 0 &&
+        amt > 0 &&
         b.sourceAccountId &&
         b.destinationAccountId &&
         b.sourceAccountId !== b.destinationAccountId;
@@ -125,7 +129,7 @@ export async function closeMonth(opts: {
             type: "transfer",
             account_id: b.sourceAccountId!,
             destination_account_id: b.destinationAccountId!,
-            amount: b.surplus,
+            amount: amt,
             description: `${b.bucket} surplus transfer — ${monthLabel} close`,
             bucket: null,
           })

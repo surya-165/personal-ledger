@@ -72,13 +72,22 @@ export function CloseMonthDialog({
 
   const [dest, setDest] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
 
   const destFor = (b: Bucket) =>
     dest[b] ?? accountByCode[bucketDefaultDestCode[b]]?.id ?? "";
   const sourceFor = (b: Bucket) => accountByCode[bucketSourceCode[b]]?.id ?? null;
+  const amountFor = (r: { bucket: Bucket; surplus: number }) => {
+    const raw = amounts[r.bucket];
+    if (raw === undefined) return r.surplus;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  };
 
   const surplusRows = rows.filter((r) => r.surplus > 0);
-  const transfers = surplusRows.filter((r) => sourceFor(r.bucket) !== destFor(r.bucket));
+  const transfers = surplusRows.filter(
+    (r) => sourceFor(r.bucket) !== destFor(r.bucket) && amountFor(r) > 0,
+  );
   const staying = surplusRows.filter((r) => sourceFor(r.bucket) === destFor(r.bucket));
 
   const totals = rows.reduce(
@@ -97,6 +106,7 @@ export function CloseMonthDialog({
         planned: r.planned,
         actual: r.actual,
         surplus: r.surplus,
+        transferAmount: r.surplus > 0 ? amountFor(r) : 0,
         sourceAccountId: sourceFor(r.bucket),
         destinationAccountId: r.surplus > 0 ? destFor(r.bucket) || null : null,
         note: notes[r.bucket] ?? "",
@@ -238,7 +248,40 @@ export function CloseMonthDialog({
                     <div className="mt-2 text-xs text-muted-foreground">
                       Staying in {accountName(src)} — no transfer will be created.
                     </div>
-                  ) : null}
+                  ) : (
+                    <div className="mt-3">
+                      <Label className="text-xs text-muted-foreground">
+                        Transfer amount (₹) — defaults to the calculated surplus
+                      </Label>
+                      <Input
+                        className="mt-1 tabular-nums"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputMode="decimal"
+                        value={amounts[r.bucket] ?? String(r.surplus)}
+                        onChange={(e) => setAmounts((s) => ({ ...s, [r.bucket]: e.target.value }))}
+                      />
+                      {amountFor(r) !== r.surplus ? (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          Calculated surplus was {formatINR(r.surplus)}.{" "}
+                          <button
+                            type="button"
+                            className="underline"
+                            onClick={() =>
+                              setAmounts((s) => {
+                                const n = { ...s };
+                                delete n[r.bucket];
+                                return n;
+                              })
+                            }
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
                   <div className="mt-3">
                     <Label className="text-xs text-muted-foreground">
                       What did you do with this surplus? (optional)
@@ -267,7 +310,7 @@ export function CloseMonthDialog({
             ) : null}
             {transfers.map((r) => (
               <div key={r.bucket}>
-                Transfer <span className="tabular-nums font-medium">{formatINR(r.surplus)}</span> from{" "}
+                Transfer <span className="tabular-nums font-medium">{formatINR(amountFor(r))}</span> from{" "}
                 {accountName(sourceFor(r.bucket))} to {accountName(destFor(r.bucket))} — {r.bucket} surplus
               </div>
             ))}
