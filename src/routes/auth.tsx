@@ -9,7 +9,14 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/auth")({
-  head: () => ({ meta: [{ title: "Sign in — Ledger" }] }),
+  head: () => ({
+    meta: [
+      { title: "Sign in — Kanakku" },
+      { name: "description", content: "Sign in to your Kanakku personal finance ledger." },
+      { property: "og:title", content: "Sign in — Kanakku" },
+      { property: "og:description", content: "Sign in to your Kanakku personal finance ledger." },
+    ],
+  }),
   component: AuthPage,
 });
 
@@ -22,7 +29,7 @@ function AuthPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!loading && session) navigate({ to: "/transactions" });
+    if (!loading && session) navigate({ to: "/", replace: true });
   }, [loading, session, navigate]);
 
   async function submit(e: React.FormEvent) {
@@ -36,7 +43,7 @@ function AuthPage() {
           options: { emailRedirectTo: window.location.origin },
         });
         if (error) throw error;
-        toast.success("Account created");
+        toast.success("Account created — check your email to confirm");
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -49,23 +56,30 @@ function AuthPage() {
   }
 
   return (
-    <div className="min-h-[60vh] flex items-center justify-center">
-      <Card className="w-full max-w-sm">
+    <div className="w-full max-w-sm">
+      <div className="mb-6 flex flex-col items-center gap-2 text-center">
+        <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary text-primary-foreground text-lg font-semibold">
+          ₹
+        </div>
+        <h1 className="text-xl font-semibold tracking-tight">Kanakku</h1>
+        <p className="text-sm text-muted-foreground">Your personal ledger</p>
+      </div>
+      <Card>
         <CardHeader>
-          <CardTitle>{mode === "signin" ? "Sign in" : "Create account"}</CardTitle>
+          <CardTitle className="text-base">{mode === "signin" ? "Sign in" : "Create account"}</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={submit} className="space-y-3">
+          <form onSubmit={submit} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Input id="email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} />
+              <Input id="password" type="password" required minLength={6} autoComplete={mode === "signin" ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} />
             </div>
             <Button type="submit" disabled={busy} className="w-full">
-              {busy ? "…" : mode === "signin" ? "Sign in" : "Create account"}
+              {busy ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}
             </Button>
             <button
               type="button"
