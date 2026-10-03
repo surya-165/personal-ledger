@@ -16,6 +16,8 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { Toaster } from "@/components/ui/sonner";
+import { useAuth } from "@/hooks/use-auth";
+import { supabase } from "@/integrations/supabase/client";
 
 function NotFoundComponent() {
   return (
@@ -138,10 +140,13 @@ function RootComponent() {
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const didRedirect = useRef(false);
+  const { session, loading } = useAuth();
 
   const sectionTitle =
     SECTION_TITLES.find(([prefix]) => pathname.startsWith(prefix))?.[1] ??
     "Dashboard";
+
+  const isPublic = pathname === "/auth" || pathname === "/zerodha-callback" || pathname.startsWith("/api");
 
   // Always land on the Dashboard on a fresh page load / refresh.
   useEffect(() => {
@@ -157,6 +162,40 @@ function RootComponent() {
       router.navigate({ to: "/", replace: true });
     }
   }, [router]);
+
+  // Auth gate: send signed-out visitors to the sign-in page.
+  useEffect(() => {
+    if (!loading && !session && !isPublic) {
+      router.navigate({ to: "/auth", replace: true });
+    }
+  }, [loading, session, isPublic, router]);
+
+  // Keep data fresh across sign-in / sign-out.
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_IN" || event === "USER_UPDATED") queryClient.invalidateQueries();
+    });
+    return () => data.subscription.unsubscribe();
+  }, [queryClient]);
+
+  if (pathname === "/auth") {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <div className="min-h-screen flex items-center justify-center bg-background px-4">
+          <Outlet />
+        </div>
+        <Toaster richColors position="top-right" />
+      </QueryClientProvider>
+    );
+  }
+
+  if (!isPublic && (loading || !session)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-sm text-muted-foreground">
+        Loading…
+      </div>
+    );
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
