@@ -10,6 +10,7 @@ import {
   formatINR,
   txTypeLabel,
   computeAccountBalances,
+  computeFundBalance,
   ccOutstanding,
   BUCKETS,
   bucketTxType,
@@ -105,6 +106,7 @@ function TransactionsPage() {
   const investments = data?.investments ?? [];
   const creditCardAccount = data?.creditCardAccount ?? null;
   const creditCardPayments = data?.creditCardPayments ?? [];
+  const surplusEntries = data?.surplusEntries ?? [];
 
   // Cards shown as filters: the three banks plus the credit card.
   const filterCards = useMemo(
@@ -193,12 +195,15 @@ function TransactionsPage() {
       if (from && t.date < from) return false;
       if (to && t.date > to) return false;
       if (typeFilter.length > 0 && !typeFilter.includes(t.type)) return false;
-      if (accountFilter.length > 0 && !accountFilter.includes(t.account_id)) return false;
-      if (bucketFilter.length > 0 && (!t.bucket || !bucketFilter.includes(t.bucket))) return false;
+      if (t.type !== "surplus_payment" && accountFilter.length > 0 && !accountFilter.includes(t.account_id)) return false;
+      const sourceBucket = t.type === "surplus_payment"
+        ? (t.surplus_bucket ?? (funds.find((f) => f.id === t.source_fund_id)?.name ?? null))
+        : t.bucket;
+      if (bucketFilter.length > 0 && (!sourceBucket || !bucketFilter.includes(sourceBucket))) return false;
       if (subFilter.length > 0 && !subFilter.includes(subLabel(t))) return false;
       return true;
     });
-  }, [transactions, from, to, typeFilter, accountFilter, bucketFilter, subFilter, subLabel]);
+  }, [transactions, from, to, typeFilter, accountFilter, bucketFilter, subFilter, subLabel, funds]);
 
   const latestTxDate = useMemo(() => {
     // transactions are fetched date-descending; the first row is the latest log.
@@ -266,6 +271,8 @@ function TransactionsPage() {
               funds={funds}
               reserves={reserves}
               investments={investments}
+              surplusEntries={surplusEntries}
+              transactions={transactions}
               userId={user!.id}
               onSaved={() => {
                 setDialogOpen(false);
@@ -402,6 +409,18 @@ function TransactionsPage() {
             </thead>
             <tbody>
               {filtered.map((t) => {
+                const isSurplusPayment = t.type === "surplus_payment";
+                const isFundPayment = isSurplusPayment && !!t.source_fund_id;
+                const surplusFund = isFundPayment ? funds.find((f) => f.id === t.source_fund_id) : null;
+                const surplusAccounts = isSurplusPayment && t.surplus_bucket
+                  ? [...new Set(surplusEntries.filter((e) => e.bucket === t.surplus_bucket)
+                    .map((e) => e.destination_account_id)
+                    .filter((id): id is string => !!id))]
+                  : [];
+                const physicalAccountText = surplusAccounts
+                  .map((id) => accountById[id]?.name)
+                  .filter((name): name is string => !!name)
+                  .join(", ");
                 const inflow =
                   t.type === "income" ||
                   t.type === "fund_withdrawal";
@@ -420,11 +439,17 @@ function TransactionsPage() {
                     </td>
                     <td className="px-5 py-3.5">
                       <Badge variant="secondary" className="font-normal whitespace-nowrap">
-                        {txTypeLabel[t.type]}
+                        {isSurplusPayment ? (isFundPayment ? "Fund payment" : "Surplus payment") : txTypeLabel[t.type]}
                       </Badge>
                     </td>
                     <td className="px-5 py-3.5">
-                      {t.is_credit_card ? (
+                      {isSurplusPayment ? (
+                        <div className="text-muted-foreground">
+                          —
+                          {physicalAccountText ? <div className="text-[11px]">From {physicalAccountText}</div> : null}
+                          {isFundPayment ? <div className="text-[11px]">Held in SBI</div> : null}
+                        </div>
+                      ) : t.is_credit_card ? (
                         <div className="space-y-1">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="whitespace-nowrap">Credit Card</span>
@@ -460,16 +485,16 @@ function TransactionsPage() {
                       )}
                     </td>
                     <td className="px-5 py-3.5 text-muted-foreground whitespace-nowrap">
-                      {t.bucket ? t.bucket : "—"}
+                      {isSurplusPayment ? (t.surplus_bucket ?? surplusFund?.name ?? "—") : (t.bucket ? t.bucket : "—")}
                     </td>
                     <td className="px-5 py-3.5 text-muted-foreground">
-                      {t.bucket ? (subLabel(t) || "—") : txTypeLabel[t.type]}
+                      {isSurplusPayment ? "—" : t.bucket ? (subLabel(t) || "—") : txTypeLabel[t.type]}
                     </td>
                     <td className={
                       "px-5 py-3.5 text-right tabular-nums font-medium whitespace-nowrap " +
-                      (inflow ? "text-success" : isInternal ? "text-muted-foreground" : "text-foreground")
+                       (isSurplusPayment ? "text-destructive" : inflow ? "text-success" : isInternal ? "text-muted-foreground" : "text-foreground")
                     }>
-                      {inflow ? "+" : isInternal ? "" : "−"}{formatINR(Number(t.amount))}
+                      {isSurplusPayment ? "−" : inflow ? "+" : isInternal ? "" : "−"}{formatINR(Number(t.amount))}
                     </td>
                     <td className="pr-3 py-3.5 w-8">
                       <div className="flex items-center gap-2 justify-end">
@@ -524,6 +549,8 @@ function TransactionsPage() {
             funds={funds}
             reserves={reserves}
             investments={investments}
+            surplusEntries={surplusEntries}
+            transactions={transactions}
             userId={user!.id}
             editing={editing}
             onSaved={() => {
@@ -710,7 +737,7 @@ function todayISO() {
 }
 
 function AddTransactionDialog({
-  accounts, creditCardAccount, categories, funds, reserves, investments, userId, onSaved, editing,
+  accounts, creditCardAccount, categories, funds, reserves, investments, surplusEntries, transactions, userId, onSaved, editing,
 }: {
   accounts: AccountRow[];
   creditCardAccount?: AccountRow | null;
@@ -718,6 +745,8 @@ function AddTransactionDialog({
   funds: FundRow[];
   reserves: ReserveRow[];
   investments: InvestmentRow[];
+  surplusEntries: { bucket: string; destination_account_id: string | null; surplus_amount: number }[];
+  transactions: TxRow[];
   userId: string;
   onSaved: () => void;
   editing?: TxRow;
@@ -741,6 +770,11 @@ function AddTransactionDialog({
   const [amount, setAmount] = useState(editing ? String(editing.amount) : "");
   const [description, setDescription] = useState(editing?.description ?? "");
   const [paymentMode, setPaymentMode] = useState<string>(editing?.payment_mode ?? "");
+  const [surplusSourceKind, setSurplusSourceKind] = useState<"bucket" | "fund">(
+    editing?.source_fund_id ? "fund" : "bucket",
+  );
+  const [surplusBucket, setSurplusBucket] = useState(editing?.surplus_bucket ?? "");
+  const [sourceFundId, setSourceFundId] = useState(editing?.source_fund_id ?? "");
   const [accountId, setAccountId] = useState<string>(editing?.account_id ?? cub?.id ?? accounts[0]?.id ?? "");
   const [destinationId, setDestinationId] = useState<string>(editing?.destination_account_id ?? "");
   const [busy, setBusy] = useState(false);
@@ -798,6 +832,8 @@ function AddTransactionDialog({
       is_credit_card: isCreditCard,
       credit_card_paid_amount: isCreditCard ? Number(editing?.credit_card_paid_amount ?? 0) : 0,
       credit_card_payment_status: isCreditCard ? (editing?.credit_card_payment_status ?? "unpaid") : null,
+      surplus_bucket: null,
+      source_fund_id: null,
     };
 
     if (mode === "bucket") {
@@ -820,6 +856,20 @@ function AddTransactionDialog({
           if (!f) return toast.error("Unknown fund");
           row.fund_id = f.id;
         }
+      }
+    } else if (otherType === "surplus_payment") {
+      if (!description.trim()) return toast.error("Enter a description for this payment");
+      // transactions.account_id is required by the existing schema. This reference
+      // is informational only; surplus_payment is explicitly ignored by balance math.
+      const accountReference = accounts[0];
+      if (!accountReference) return toast.error("No account is available for the transaction record");
+      row.account_id = accountReference.id;
+      if (surplusSourceKind === "bucket") {
+        if (!surplusBucket) return toast.error("Choose a surplus bucket");
+        row.surplus_bucket = surplusBucket;
+      } else {
+        if (!sourceFundId) return toast.error("Choose a goal fund");
+        row.source_fund_id = sourceFundId;
       }
     } else if (otherType === "income") {
       if (!accountId) return toast.error("Pick an account");
@@ -864,7 +914,7 @@ function AddTransactionDialog({
       </DialogHeader>
 
       {/* Step 1 — Level 1 bucket */}
-      <div>
+      {otherType !== "surplus_payment" || mode !== "other" ? <div>
         <Label className="text-xs text-muted-foreground mb-1.5 block">Bucket</Label>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {BUCKETS.map((b) => {
@@ -903,7 +953,7 @@ function AddTransactionDialog({
             Type: <span className="text-foreground font-medium">{txTypeLabel[type]}</span> (set automatically)
           </div>
         ) : null}
-      </div>
+      </div> : null}
 
       <div className="grid grid-cols-2 gap-3">
         {/* Step 2 — Level 2 sub-category */}
@@ -936,6 +986,47 @@ function AddTransactionDialog({
           </Field>
         ) : null}
 
+        {mode === "other" && otherType === "surplus_payment" ? (
+          <div className="col-span-2 space-y-3">
+            <Field label="Source">
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <Button type="button" variant={surplusSourceKind === "bucket" ? "default" : "outline"} onClick={() => setSurplusSourceKind("bucket")}>Surplus bucket</Button>
+                <Button type="button" variant={surplusSourceKind === "fund" ? "default" : "outline"} onClick={() => setSurplusSourceKind("fund")}>Goal fund</Button>
+              </div>
+              {surplusSourceKind === "bucket" ? (
+                <Select value={surplusBucket} onValueChange={setSurplusBucket}>
+                  <SelectTrigger><SelectValue placeholder="Choose a bucket" /></SelectTrigger>
+                  <SelectContent>
+                    {BUCKETS.map((b) => {
+                      const inflow = surplusEntries.filter((e) => e.bucket === b).reduce((sum, e) => sum + Number(e.surplus_amount), 0);
+                      const paid = transactions.filter((t) => t.type === "surplus_payment" && t.surplus_bucket === b).reduce((sum, t) => sum + Number(t.amount), 0);
+                      return <SelectItem key={b} value={b}>{b}<span className="ml-2 text-muted-foreground">· {formatINR(inflow - paid)} remaining</span></SelectItem>;
+                    })}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Select value={sourceFundId} onValueChange={setSourceFundId}>
+                  <SelectTrigger><SelectValue placeholder="Choose a fund" /></SelectTrigger>
+                  <SelectContent>
+                    {funds.map((f) => <SelectItem key={f.id} value={f.id}>{f.name}<span className="ml-2 text-muted-foreground">· {formatINR(computeFundBalance(f, transactions))}</span></SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
+            </Field>
+            <div className="text-xs text-muted-foreground">
+              {surplusSourceKind === "fund"
+                ? "This fund is held in SBI"
+                : surplusBucket
+                  ? (() => {
+                      const ids = [...new Set(surplusEntries.filter((e) => e.bucket === surplusBucket).map((e) => e.destination_account_id).filter((id): id is string => !!id))];
+                      const names = ids.map((id) => accounts.find((a) => a.id === id)?.name).filter((n): n is string => !!n);
+                      return names.length ? `This surplus physically resides in ${names.join(", ")}` : null;
+                    })()
+                  : null}
+            </div>
+          </div>
+        ) : null}
+
         <Field label="Date">
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
@@ -958,7 +1049,7 @@ function AddTransactionDialog({
         ) : null}
 
         {/* Accounts */}
-        {!(mode === "bucket" && bucket === "Tax Reserve") ? (
+        {mode !== "other" || otherType !== "surplus_payment" ? ( !(mode === "bucket" && bucket === "Tax Reserve") ? (
           <Field label={type === "transfer" || type === "internal_loan_repayment" ? "From account" : "Account"}>
             <Select value={accountId} onValueChange={setAccountId}>
               <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
@@ -970,7 +1061,7 @@ function AddTransactionDialog({
               </SelectContent>
             </Select>
           </Field>
-        ) : null}
+        ) : null) : null}
 
         {mode === "other" && (otherType === "transfer" || otherType === "internal_loan_repayment") ? (
           <Field label="To account">
@@ -993,7 +1084,7 @@ function AddTransactionDialog({
 
         <div className="col-span-2">
           <Label className="text-xs text-muted-foreground mb-1.5 block">Description</Label>
-          <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional note" />
+          <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={otherType === "surplus_payment" ? "Required description" : "Optional note"} required={otherType === "surplus_payment"} />
         </div>
       </div>
 
