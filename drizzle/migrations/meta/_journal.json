@@ -8,6 +8,13 @@
       "when": 1792491156378,
       "tag": "0000_add_surplus_payment_sources",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792491179847,
+      "tag": "0001_fix_surplus_payment_source_constraint",
+      "breakpoints": true
     }
   ]
 }
