@@ -9,7 +9,8 @@ export type TxType =
   | "reserve_accrual"
   | "loan_given"
   | "loan_received"
-  | "internal_loan_repayment";
+  | "internal_loan_repayment"
+  | "surplus_payment";
 
 export interface AccountRow {
   id: string;
@@ -44,6 +45,7 @@ export const nonSpendingTypes: TxType[] = [
   "loan_given",
   "loan_received",
   "internal_loan_repayment",
+  "surplus_payment",
 ];
 
 export interface CategoryRow { id: string; name: string; monthly_limit: number; bucket: string }
@@ -68,6 +70,19 @@ export interface TxRow {
   is_credit_card?: boolean | null;
   credit_card_paid_amount?: number | null;
   credit_card_payment_status?: CreditCardStatus | null;
+  surplus_bucket?: string | null;
+  source_fund_id?: string | null;
+  created_at?: string;
+}
+
+export interface SurplusLedgerRow {
+  id: string;
+  closure_id: string;
+  month: string;
+  bucket: string;
+  surplus_amount: number;
+  source_account_id: string | null;
+  destination_account_id: string | null;
 }
 
 export type CreditCardStatus = "unpaid" | "partial" | "paid";
@@ -107,7 +122,7 @@ export interface LoanRow {
 }
 
 export async function fetchAll(userId: string) {
-  const [accounts, categories, funds, reserves, transactions, loans, investments, ccPayments] = await Promise.all([
+  const [accounts, categories, funds, reserves, transactions, loans, investments, ccPayments, surplusEntries] = await Promise.all([
     supabase.from("accounts").select("id,code,name,role,opening_balance").order("code"),
     supabase.from("categories").select("id,name,monthly_limit,bucket").order("sort_order"),
     supabase.from("funds").select("id,code,name,account_id,monthly_target,opening_balance").order("code"),
@@ -116,8 +131,9 @@ export async function fetchAll(userId: string) {
     supabase.from("loans" as never).select("*").order("disbursement_date", { ascending: false }),
     supabase.from("investments").select("id,name,active").order("name"),
     supabase.from("credit_card_payments" as never).select("*").order("payment_date", { ascending: false }),
+    supabase.from("surplus_entries").select("*").order("month", { ascending: false }),
   ]);
-  const err = accounts.error ?? categories.error ?? funds.error ?? reserves.error ?? transactions.error ?? loans.error ?? investments.error ?? ccPayments.error;
+  const err = accounts.error ?? categories.error ?? funds.error ?? reserves.error ?? transactions.error ?? loans.error ?? investments.error ?? ccPayments.error ?? surplusEntries.error;
   if (err) throw err;
   const allAccounts = (accounts.data ?? []) as AccountRow[];
   return {
@@ -131,6 +147,7 @@ export async function fetchAll(userId: string) {
     loans: (loans.data ?? []) as unknown as LoanRow[],
     investments: (investments.data ?? []) as InvestmentRow[],
     creditCardPayments: (ccPayments.data ?? []) as unknown as CreditCardPaymentRow[],
+    surplusEntries: (surplusEntries.data ?? []) as unknown as SurplusLedgerRow[],
   };
   // userId is unused here because RLS scopes rows; kept for future composition.
   void userId;
@@ -218,6 +235,9 @@ export function computeAccountBalances(
       case "reserve_accrual":
         // earmark within the account — does not change balance
         break;
+      case "surplus_payment":
+        // A payment consumes an earmarked surplus/fund, not bank cash.
+        break;
     }
   }
   return out;
@@ -230,6 +250,7 @@ export function computeFundBalance(fund: FundRow, transactions: TxRow[]): number
     if (t.fund_id !== fund.id) continue;
     if (t.type === "fund_contribution") n += Number(t.amount);
     else if (t.type === "fund_withdrawal") n -= Number(t.amount);
+    if (t.type === "surplus_payment" && t.source_fund_id === fund.id) n -= Number(t.amount);
   }
   return n;
 }
@@ -264,4 +285,5 @@ export const txTypeLabel: Record<TxType, string> = {
   loan_given: "Loan given",
   loan_received: "Loan received",
   internal_loan_repayment: "Loan repayment (self)",
+  surplus_payment: "Pay from surplus / fund",
 };
