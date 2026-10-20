@@ -853,7 +853,9 @@ export type Database = {
           loan_id: string | null
           payment_mode: string | null
           reserve_id: string | null
+          source_fund_id: string | null
           sub_category: string | null
+          surplus_bucket: string | null
           type: Database["public"]["Enums"]["transaction_type"]
           updated_at: string
           user_id: string
@@ -877,7 +879,9 @@ export type Database = {
           loan_id?: string | null
           payment_mode?: string | null
           reserve_id?: string | null
+          source_fund_id?: string | null
           sub_category?: string | null
+          surplus_bucket?: string | null
           type: Database["public"]["Enums"]["transaction_type"]
           updated_at?: string
           user_id: string
@@ -901,7 +905,9 @@ export type Database = {
           loan_id?: string | null
           payment_mode?: string | null
           reserve_id?: string | null
+          source_fund_id?: string | null
           sub_category?: string | null
+          surplus_bucket?: string | null
           type?: Database["public"]["Enums"]["transaction_type"]
           updated_at?: string
           user_id?: string
@@ -949,6 +955,13 @@ export type Database = {
             referencedRelation: "reserves"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "transactions_source_fund_id_fkey"
+            columns: ["source_fund_id"]
+            isOneToOne: false
+            referencedRelation: "funds"
+            referencedColumns: ["id"]
+          },
         ]
       }
     }
@@ -979,6 +992,7 @@ export type Database = {
         | "loan_given"
         | "loan_received"
         | "internal_loan_repayment"
+        | "surplus_payment"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1127,6 +1141,7 @@ export const Constants = {
         "loan_given",
         "loan_received",
         "internal_loan_repayment",
+        "surplus_payment",
       ],
     },
   },
