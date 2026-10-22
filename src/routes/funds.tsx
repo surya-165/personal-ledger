@@ -1,6 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { fetchAll, formatINR } from "@/lib/finance-db";
 import { PageHeader } from "@/components/finance/page-header";
@@ -35,14 +38,25 @@ function FundsPage() {
   });
 
   const ym = currentMonthKey();
+  const qc = useQueryClient();
+  const deletePayment = async (id: string, amount: number, fundName: string) => {
+    if (!window.confirm(`Remove this ${formatINR(amount)} payment from ${fundName}? This cannot be undone.`)) return;
+    const { error } = await supabase.from("transactions").delete().eq("id", id);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Payment removed");
+    qc.invalidateQueries({ queryKey: ["finance"] });
+    qc.invalidateQueries({ queryKey: ["surplus-history"] });
+  };
 
   const view = useMemo(() => {
     if (!q.data) return [];
     const { funds, transactions } = q.data;
     return funds.map((f) => {
-      // Fund entries: contributions/withdrawals for this fund, chronological ascending for running balance
+      // Fund entries: contributions/withdrawals/payments for this fund, chronological ascending for running balance
       const entries = transactions
-        .filter((t) => t.fund_id === f.id && (t.type === "fund_contribution" || t.type === "fund_withdrawal"))
+        .filter((t) =>
+          (t.fund_id === f.id && (t.type === "fund_contribution" || t.type === "fund_withdrawal")) ||
+          (t.type === "surplus_payment" && t.source_fund_id === f.id))
         .slice()
         .sort((a, b) => a.date.localeCompare(b.date));
 
@@ -51,12 +65,14 @@ function FundsPage() {
         const amt = Number(t.amount);
         if (t.type === "fund_contribution") running += amt;
         else running -= amt;
+        const kind = t.type === "fund_contribution" ? "contribution" as const
+          : t.type === "surplus_payment" ? "payment" as const : "withdrawal" as const;
         return {
           id: t.id,
           date: t.date,
-          kind: t.type === "fund_contribution" ? "contribution" as const : "withdrawal" as const,
+          kind,
           amount: amt,
-          description: t.description || (t.type === "fund_contribution" ? "Contribution" : "Withdrawal"),
+          description: t.description || (kind === "contribution" ? "Contribution" : kind === "payment" ? "Payment" : "Withdrawal"),
           running,
         };
       });
@@ -135,7 +151,7 @@ function FundsPage() {
                           <span
                             className={
                               "tabular-nums text-sm font-medium " +
-                              (e.kind === "contribution" ? "text-success" : "text-foreground")
+                              (e.kind === "contribution" ? "text-success" : e.kind === "payment" ? "text-destructive" : "text-foreground")
                             }
                           >
                             {e.kind === "contribution" ? "+" : "−"}
@@ -144,6 +160,16 @@ function FundsPage() {
                           <span className="tabular-nums text-xs text-muted-foreground w-20 text-right hidden sm:inline">
                             {formatINR(e.running)}
                           </span>
+                          {e.kind === "payment" ? (
+                            <button
+                              type="button"
+                              aria-label="Delete payment"
+                              className="text-muted-foreground hover:text-destructive"
+                              onClick={() => deletePayment(e.id, e.amount, f.name)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          ) : null}
                         </div>
                       </li>
                     ))}
