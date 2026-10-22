@@ -247,10 +247,13 @@ export function computeAccountBalances(
 export function computeFundBalance(fund: FundRow, transactions: TxRow[]): number {
   let n = Number(fund.opening_balance);
   for (const t of transactions) {
+    if (t.type === "surplus_payment") {
+      if (t.source_fund_id === fund.id) n -= Number(t.amount);
+      continue;
+    }
     if (t.fund_id !== fund.id) continue;
     if (t.type === "fund_contribution") n += Number(t.amount);
     else if (t.type === "fund_withdrawal") n -= Number(t.amount);
-    if (t.type === "surplus_payment" && t.source_fund_id === fund.id) n -= Number(t.amount);
   }
   return n;
 }

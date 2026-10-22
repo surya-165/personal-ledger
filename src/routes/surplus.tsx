@@ -1,7 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+
+type SurplusPay = { id: string; date: string; amount: number; description: string | null; surplus_bucket: string | null };
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import { formatINR, type AccountRow } from "@/lib/finance-db";
@@ -41,15 +44,37 @@ function SurplusPage() {
     queryKey: ["surplus-history", user?.id],
     enabled: !!user,
     queryFn: async () => {
-      const [closures, entries, accounts] = await Promise.all([
+      const [closures, entries, accounts, pays] = await Promise.all([
         fetchClosures(),
         fetchSurplusEntries(),
         supabase.from("accounts").select("id,code,name,role,opening_balance").neq("code","CCARD").order("code"),
+        supabase
+          .from("transactions")
+          .select("id,date,amount,description,surplus_bucket")
+          .eq("type", "surplus_payment")
+          .not("surplus_bucket", "is", null)
+          .order("date"),
       ]);
       if (accounts.error) throw accounts.error;
-      return { closures, entries, accounts: (accounts.data ?? []) as AccountRow[] };
+      if (pays.error) throw pays.error;
+      return {
+        closures,
+        entries,
+        accounts: (accounts.data ?? []) as AccountRow[],
+        payments: (pays.data ?? []) as SurplusPay[],
+      };
     },
   });
+
+  const qc = useQueryClient();
+  const deletePayment = async (p: SurplusPay) => {
+    if (!window.confirm(`Remove this ${formatINR(Number(p.amount))} payment from ${p.surplus_bucket} surplus? This cannot be undone.`)) return;
+    const { error } = await supabase.from("transactions").delete().eq("id", p.id);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Payment removed");
+    qc.invalidateQueries({ queryKey: ["surplus-history"] });
+    qc.invalidateQueries({ queryKey: ["finance"] });
+  };
 
   const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
 
@@ -70,6 +95,31 @@ function SurplusPage() {
     return { total, byAccount };
   }, [q.data]);
 
+  // Each payment belongs to the latest closed month on/before its date (else the earliest).
+  const ledger = useMemo(() => {
+    const closures = (q.data?.closures ?? []).slice().sort((a, b) => a.month.localeCompare(b.month));
+    const entries = q.data?.entries ?? [];
+    const payments = q.data?.payments ?? [];
+    const paysByClosure: Record<string, SurplusPay[]> = {};
+    for (const p of payments) {
+      let target = closures[0];
+      for (const c of closures) if (c.month.slice(0, 10) <= p.date) target = c;
+      if (!target) continue;
+      (paysByClosure[target.id] ??= []).push(p);
+    }
+    const byClosure: Record<string, { monthTotal: number; payTotal: number; balanceAfter: number }> = {};
+    let running = 0;
+    let paidTotal = 0;
+    for (const c of closures) {
+      const monthTotal = entries.filter((e) => e.closure_id === c.id).reduce((s, r) => s + Number(r.surplus_amount), 0);
+      const payTotal = (paysByClosure[c.id] ?? []).reduce((s, p) => s + Number(p.amount), 0);
+      paidTotal += payTotal;
+      running += monthTotal - payTotal;
+      byClosure[c.id] = { monthTotal, payTotal, balanceAfter: running };
+    }
+    return { byClosure, paysByClosure, remaining: running, paidTotal };
+  }, [q.data]);
+
   if (loading || !session) return <div className="text-sm text-muted-foreground">Loading…</div>;
   if (q.isLoading || !q.data) return <div className="text-sm text-muted-foreground">Loading surplus history…</div>;
 
@@ -86,11 +136,12 @@ function SurplusPage() {
         <Card>
           <CardContent className="pt-5 pb-5">
             <div className="text-xs uppercase tracking-wide text-muted-foreground">
-              Total surplus to date
+              Surplus remaining
             </div>
-            <div className="mt-1 text-2xl font-semibold tabular-nums">{formatINR(totals.total)}</div>
+            <div className="mt-1 text-2xl font-semibold tabular-nums">{formatINR(ledger.remaining)}</div>
             <div className="text-xs text-muted-foreground mt-0.5">
               across {closures.length} closed month{closures.length === 1 ? "" : "s"}
+              {ledger.paidTotal > 0 ? ` · ${formatINR(ledger.paidTotal)} paid out` : ""}
             </div>
           </CardContent>
         </Card>
@@ -121,7 +172,10 @@ function SurplusPage() {
               month: "long",
               year: "numeric",
             });
-            const monthTotal = rows.reduce((s, r) => s + Number(r.surplus_amount), 0);
+            const info = ledger.byClosure[c.id] ?? { monthTotal: 0, payTotal: 0, balanceAfter: 0 };
+            const { monthTotal, payTotal, balanceAfter } = info;
+            const net = monthTotal - payTotal;
+            const pays = ledger.paysByClosure[c.id] ?? [];
             const byDest: Record<string, number> = {};
             for (const r of rows) {
               const s = Number(r.surplus_amount);
@@ -155,16 +209,24 @@ function SurplusPage() {
                         </div>
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div
-                        className={
-                          "text-sm font-semibold tabular-nums " +
-                          (monthTotal > 0 ? "text-success" : monthTotal < 0 ? "text-destructive" : "")
-                        }
-                      >
-                        {formatINR(monthTotal)}
+                    <div className="flex items-start gap-6 shrink-0">
+                      <div className="text-right">
+                        <div
+                          className={
+                            "text-sm font-semibold tabular-nums " +
+                            (net > 0 ? "text-success" : net < 0 ? "text-destructive" : "")
+                          }
+                        >
+                          {formatINR(net)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          net for month{payTotal > 0 ? ` (${formatINR(monthTotal)} − ${formatINR(payTotal)} paid)` : ""}
+                        </div>
                       </div>
-                      <div className="text-xs text-muted-foreground">net surplus</div>
+                      <div className="text-right">
+                        <div className="text-sm font-semibold tabular-nums">{formatINR(balanceAfter)}</div>
+                        <div className="text-xs text-muted-foreground">balance after</div>
+                      </div>
                     </div>
                   </button>
 
@@ -222,6 +284,43 @@ function SurplusPage() {
                           </tbody>
                         </table>
                       </div>
+                      {pays.length > 0 ? (
+                        <div className="mt-3 rounded-md border border-border overflow-x-auto">
+                          <table className="w-full text-sm min-w-[520px]">
+                            <thead className="bg-muted/50 text-xs text-muted-foreground">
+                              <tr>
+                                <th className="text-left font-medium px-3 py-2">Date</th>
+                                <th className="text-left font-medium px-3 py-2">Paid from surplus</th>
+                                <th className="text-left font-medium px-3 py-2">Description</th>
+                                <th className="text-right font-medium px-3 py-2">Amount</th>
+                                <th className="px-3 py-2" />
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border">
+                              {pays.map((p) => (
+                                <tr key={p.id}>
+                                  <td className="px-3 py-2 text-muted-foreground">{p.date}</td>
+                                  <td className="px-3 py-2">{p.surplus_bucket}</td>
+                                  <td className="px-3 py-2 text-muted-foreground">{p.description || "—"}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums font-medium text-destructive">
+                                    −{formatINR(Number(p.amount))}
+                                  </td>
+                                  <td className="px-3 py-2 text-right">
+                                    <button
+                                      type="button"
+                                      aria-label="Delete payment"
+                                      className="text-muted-foreground hover:text-destructive"
+                                      onClick={() => deletePayment(p)}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : null}
                       <div className="mt-3 text-xs text-muted-foreground">
                         {accounts
                           .map((a) => `${formatINR(byDest[a.id] ?? 0)} in ${a.name}`)
