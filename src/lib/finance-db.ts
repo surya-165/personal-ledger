@@ -25,6 +25,7 @@ export const BUCKETS = [
   "Fund Contributions",
   "Fixed Commitments",
   "Tax Reserve",
+  "Others",
 ] as const;
 export type Bucket = (typeof BUCKETS)[number];
 
@@ -35,6 +36,7 @@ export const bucketTxType: Record<Bucket, TxType> = {
   "Fund Contributions": "fund_contribution",
   "Fixed Commitments": "expense",
   "Tax Reserve": "reserve_accrual",
+  "Others": "expense",
 };
 
 /** Non-spending types — they never belong to a bucket. */

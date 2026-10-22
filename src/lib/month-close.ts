@@ -8,6 +8,7 @@ export const bucketSourceCode: Record<Bucket, string> = {
   "Fund Contributions": "SBI",
   "Fixed Commitments": "SBI",
   "Tax Reserve": "SBI",
+  "Others": "CUB",
 };
 
 /** Default destination account code for a bucket's surplus. */
@@ -17,6 +18,7 @@ export const bucketDefaultDestCode: Record<Bucket, string> = {
   "Fund Contributions": "SBI",
   "Fixed Commitments": "SBI",
   "Tax Reserve": "SBI",
+  "Others": "HDFC",
 };
 
 export const ALL_BUCKETS = BUCKETS;
