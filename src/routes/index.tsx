@@ -24,7 +24,7 @@ export const Route = createFileRoute("/")({
 
 type Level =
   | { name: "l1" }
-  | { name: "l2"; bucket: "regular" | "sip" | "funds" | "fixed" }
+  | { name: "l2"; bucket: "regular" | "sip" | "funds" | "fixed" | "others" }
   | { name: "l3"; categoryId: string };
 
 function Dashboard() {
