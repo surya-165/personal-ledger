@@ -188,6 +188,7 @@ function Dashboard() {
   const actualFunds = bucketTotals["Fund Contributions"] ?? 0;
   const actualTax = bucketTotals["Tax Reserve"] ?? 0;
   const actualSIP = bucketTotals["SIP Investments"] ?? 0;
+  const actualOthers = bucketTotals["Others"] ?? 0;
   // SIP actuals per fund — matched on the Level 2 sub-category, falling back to
   // the description for transactions logged before sub-categories existed.
   const actualSIPByInvestment: Record<string, number> = {};

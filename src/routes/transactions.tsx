@@ -798,7 +798,7 @@ function AddTransactionDialog({
     setDestinationId("");
     if (mode === "bucket") {
       setSub(bucket === "Tax Reserve" ? "Tax Reserve" : "");
-      if (bucket === "Regular Expenses") setAccountId(cub?.id ?? accounts[0]?.id ?? "");
+      if (bucket === "Regular Expenses" || bucket === "Others") setAccountId(cub?.id ?? accounts[0]?.id ?? "");
       else if (bucket === "SIP Investments") setAccountId(hdfc?.id ?? accounts[0]?.id ?? "");
       else setAccountId(sbi?.id ?? accounts[0]?.id ?? "");
     } else {
@@ -843,10 +843,10 @@ function AddTransactionDialog({
         row.account_id = taxReserve.account_id;
         row.sub_category = "Tax Reserve";
       } else {
-        if (!sub) return toast.error("Pick a category");
+        if (!sub.trim()) return toast.error(bucket === "Others" ? "Enter a category" : "Pick a category");
         if (!accountId) return toast.error("Pick an account");
         row.account_id = accountId;
-        row.sub_category = sub;
+        row.sub_category = sub.trim();
         if (bucket === "Regular Expenses" || bucket === "Fixed Commitments") {
           const cat = categories.find((c) => c.name === sub);
           if (!cat) return toast.error("Unknown category");
@@ -957,7 +957,12 @@ function AddTransactionDialog({
 
       <div className="grid grid-cols-2 gap-3">
         {/* Step 2 — Level 2 sub-category */}
-        {mode === "bucket" && bucket && bucket !== "Tax Reserve" ? (
+        {mode === "bucket" && bucket === "Others" ? (
+          <Field label="Category">
+            <Input value={sub} onChange={(e) => setSub(e.target.value)} placeholder="e.g. Medical, Gifts" />
+          </Field>
+        ) : null}
+        {mode === "bucket" && bucket && bucket !== "Tax Reserve" && bucket !== "Others" ? (
           <Field label="Category">
             <Select value={sub} onValueChange={setSub}>
               <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
