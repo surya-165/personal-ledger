@@ -203,7 +203,7 @@ function Dashboard() {
       .reduce((s, t) => s + Number(t.amount), 0);
   }
 
-  const totalAllocated = actualRegular + actualSIP + actualFunds + actualFixed + actualTax;
+  const totalAllocated = actualRegular + actualSIP + actualFunds + actualFixed + actualTax + actualOthers;
   const totalPlannedBuckets = plannedRegular + plannedSIP + plannedFundsTotal + plannedFixed + plannedTax;
   const plannedUnallocated = plannedIncome - totalPlannedBuckets;
   const unallocated = plannedIncome - totalAllocated;
@@ -219,6 +219,7 @@ function Dashboard() {
     { bucket: "Fund Contributions", planned: plannedFundsTotal, actual: actualFunds },
     { bucket: "Fixed Commitments", planned: plannedFixed, actual: actualFixed },
     { bucket: "Tax Reserve", planned: plannedTax, actual: actualTax },
+    { bucket: "Others", planned: 0, actual: actualOthers },
   ];
 
   const go = (l: Level) => setLevel(l);
@@ -299,8 +300,9 @@ function Dashboard() {
               { key: "funds", label: "Fund Contributions", sub: "Corpus + Trip (held inside SBI)", actual: actualFunds, planned: plannedFundsTotal, drill: true },
               { key: "fixed", label: "Fixed Commitments", sub: maintenanceDue ? "Car EMI + Flat Maintenance (due)" : "Car EMI · Flat Maintenance not due", actual: actualFixed, planned: plannedFixed, drill: true },
               { key: "tax", label: "Tax Reserve", sub: "Monthly accrual inside SBI", actual: actualTax, planned: plannedTax, drill: false },
+              { key: "others", label: "Others", sub: "Unbudgeted · your own categories", actual: actualOthers, planned: 0, drill: true },
             ]}
-            onDrill={(key) => go({ name: "l2", bucket: key as "regular" | "sip" | "funds" | "fixed" })}
+            onDrill={(key) => go({ name: "l2", bucket: key as "regular" | "sip" | "funds" | "fixed" | "others" })}
             unallocated={unallocated}
             plannedUnallocated={plannedUnallocated}
             remainderMissing={remainderMissing}
@@ -342,6 +344,28 @@ function Dashboard() {
             nextMaintenanceMonth={nextMaintenanceMonth}
             onBack={() => go({ name: "l1" })}
           />
+        ) : level.name === "l2" && level.bucket === "others" ? (
+          <div>
+            <BackBar label="Others" onBack={() => go({ name: "l1" })} />
+            <Card>
+              <CardContent className="pt-4 divide-y divide-border">
+                {monthTx.filter((t) => t.bucket === "Others").length === 0 ? (
+                  <div className="py-6 text-sm text-muted-foreground">No Others transactions this month.</div>
+                ) : monthTx.filter((t) => t.bucket === "Others").map((t) => (
+                  <div key={t.id} className="py-3 flex items-baseline justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">{t.sub_category || "Others"}</div>
+                      <div className="text-xs text-muted-foreground truncate">{t.date}{t.description ? " · " + t.description : ""}</div>
+                    </div>
+                    <div className="text-sm font-medium tabular-nums">{formatINR(Number(t.amount))}</div>
+                  </div>
+                ))}
+                <div className="py-3 flex justify-between text-sm font-semibold">
+                  <span>Total</span><span className="tabular-nums">{formatINR(actualOthers)}</span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         ) : level.name === "l3" ? (
           <Level3
             category={categories.find((c) => c.id === level.categoryId) ?? null}
