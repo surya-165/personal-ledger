@@ -756,9 +756,10 @@ function AddTransactionDialog({
   const sbi = accounts.find((a) => a.code === "SBI");
   const taxReserve = reserves.find((r) => !r.name.toLowerCase().includes("floor")) ?? reserves[0];
 
-  const initialBucket = (editing?.bucket as Bucket | undefined) ?? undefined;
+  const editingSurplus = editing?.type === "surplus_payment";
+  const initialBucket = editingSurplus ? ("Others" as Bucket) : (editing?.bucket as Bucket | undefined) ?? undefined;
   const [mode, setMode] = useState<"bucket" | "other">(
-    editing ? (editing.bucket ? "bucket" : "other") : "bucket",
+    editing ? (editing.bucket || editingSurplus ? "bucket" : "other") : "bucket",
   );
   const [bucket, setBucket] = useState<Bucket | "">(initialBucket ?? "");
   const [otherType, setOtherType] = useState<TxType>(
@@ -770,6 +771,7 @@ function AddTransactionDialog({
   const [amount, setAmount] = useState(editing ? String(editing.amount) : "");
   const [description, setDescription] = useState(editing?.description ?? "");
   const [paymentMode, setPaymentMode] = useState<string>(editing?.payment_mode ?? "");
+  const [othersSource, setOthersSource] = useState<"direct" | "surplus">(editingSurplus ? "surplus" : "direct");
   const [surplusSourceKind, setSurplusSourceKind] = useState<"bucket" | "fund">(
     editing?.source_fund_id ? "fund" : "bucket",
   );
@@ -779,7 +781,8 @@ function AddTransactionDialog({
   const [destinationId, setDestinationId] = useState<string>(editing?.destination_account_id ?? "");
   const [busy, setBusy] = useState(false);
 
-  const type: TxType = mode === "bucket" && bucket ? bucketTxType[bucket] : otherType;
+  const isSurplusPay = mode === "bucket" && bucket === "Others" && othersSource === "surplus";
+  const type: TxType = isSurplusPay ? "surplus_payment" : mode === "bucket" && bucket ? bucketTxType[bucket] : otherType;
 
   const regularCats = categories.filter((c) => c.bucket === "Regular Expenses");
   const fixedCats = categories.filter((c) => c.bucket === "Fixed Commitments");
@@ -827,7 +830,7 @@ function AddTransactionDialog({
       category_id: null,
       fund_id: null,
       reserve_id: null,
-      bucket: mode === "bucket" ? bucket : null,
+      bucket: mode === "bucket" && !isSurplusPay ? bucket : null,
       sub_category: null,
       is_credit_card: isCreditCard,
       credit_card_paid_amount: isCreditCard ? Number(editing?.credit_card_paid_amount ?? 0) : 0,
@@ -836,7 +839,20 @@ function AddTransactionDialog({
       source_fund_id: null,
     };
 
-    if (mode === "bucket") {
+    if (isSurplusPay) {
+      if (!description.trim()) return toast.error("Enter a description for this payment");
+      const accountReference = accounts[0];
+      if (!accountReference) return toast.error("No account is available for the transaction record");
+      row.account_id = accountReference.id;
+      row.sub_category = sub.trim() || null;
+      if (surplusSourceKind === "bucket") {
+        if (!surplusBucket) return toast.error("Choose a surplus bucket");
+        row.surplus_bucket = surplusBucket;
+      } else {
+        if (!sourceFundId) return toast.error("Choose a goal fund");
+        row.source_fund_id = sourceFundId;
+      }
+    } else if (mode === "bucket") {
       if (bucket === "Tax Reserve") {
         if (!taxReserve) return toast.error("No tax reserve configured");
         row.reserve_id = taxReserve.id;
@@ -857,7 +873,7 @@ function AddTransactionDialog({
           row.fund_id = f.id;
         }
       }
-    } else if (otherType === "surplus_payment") {
+    } else if (false as boolean) {
       if (!description.trim()) return toast.error("Enter a description for this payment");
       // transactions.account_id is required by the existing schema. This reference
       // is informational only; surplus_payment is explicitly ignored by balance math.
@@ -914,7 +930,7 @@ function AddTransactionDialog({
       </DialogHeader>
 
       {/* Step 1 — Level 1 bucket */}
-      {otherType !== "surplus_payment" || mode !== "other" ? <div>
+      <div>
         <Label className="text-xs text-muted-foreground mb-1.5 block">Bucket</Label>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {BUCKETS.map((b) => {
@@ -953,13 +969,19 @@ function AddTransactionDialog({
             Type: <span className="text-foreground font-medium">{txTypeLabel[type]}</span> (set automatically)
           </div>
         ) : null}
-      </div> : null}
+        {mode === "bucket" && bucket === "Others" ? (
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <Button type="button" size="sm" variant={othersSource === "direct" ? "default" : "outline"} onClick={() => setOthersSource("direct")}>Regular spend</Button>
+            <Button type="button" size="sm" variant={othersSource === "surplus" ? "default" : "outline"} onClick={() => setOthersSource("surplus")}>Pay from surplus / fund</Button>
+          </div>
+        ) : null}
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         {/* Step 2 — Level 2 sub-category */}
         {mode === "bucket" && bucket === "Others" ? (
           <Field label="Category">
-            <Input value={sub} onChange={(e) => setSub(e.target.value)} placeholder="e.g. Medical, Gifts" />
+            <Input value={sub} onChange={(e) => setSub(e.target.value)} placeholder={isSurplusPay ? "Optional, e.g. Medical" : "e.g. Medical, Gifts"} />
           </Field>
         ) : null}
         {mode === "bucket" && bucket && bucket !== "Tax Reserve" && bucket !== "Others" ? (
@@ -991,7 +1013,7 @@ function AddTransactionDialog({
           </Field>
         ) : null}
 
-        {mode === "other" && otherType === "surplus_payment" ? (
+        {isSurplusPay ? (
           <div className="col-span-2 space-y-3">
             <Field label="Source">
               <div className="grid grid-cols-2 gap-2 mb-2">
@@ -1054,7 +1076,7 @@ function AddTransactionDialog({
         ) : null}
 
         {/* Accounts */}
-        {mode !== "other" || otherType !== "surplus_payment" ? ( !(mode === "bucket" && bucket === "Tax Reserve") ? (
+        {!isSurplusPay ? ( !(mode === "bucket" && bucket === "Tax Reserve") ? (
           <Field label={type === "transfer" || type === "internal_loan_repayment" ? "From account" : "Account"}>
             <Select value={accountId} onValueChange={setAccountId}>
               <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
@@ -1089,7 +1111,7 @@ function AddTransactionDialog({
 
         <div className="col-span-2">
           <Label className="text-xs text-muted-foreground mb-1.5 block">Description</Label>
-          <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={otherType === "surplus_payment" ? "Required description" : "Optional note"} required={otherType === "surplus_payment"} />
+          <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={isSurplusPay ? "Required description" : "Optional note"} required={isSurplusPay} />
         </div>
       </div>
 
