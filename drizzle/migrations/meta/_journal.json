@@ -15,6 +15,13 @@
       "when": 1792491179847,
       "tag": "0001_fix_surplus_payment_source_constraint",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793193275099,
+      "tag": "0002_cc_payment_surplus_link",
+      "breakpoints": true
     }
   ]
 }

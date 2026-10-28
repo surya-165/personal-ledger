@@ -134,6 +134,7 @@ export type Database = {
           payment_amount: number
           payment_date: string
           payment_transaction_id: string | null
+          surplus_transaction_id: string | null
           transaction_id: string
           updated_at: string
           user_id: string
@@ -146,6 +147,7 @@ export type Database = {
           payment_amount: number
           payment_date: string
           payment_transaction_id?: string | null
+          surplus_transaction_id?: string | null
           transaction_id: string
           updated_at?: string
           user_id: string
@@ -158,6 +160,7 @@ export type Database = {
           payment_amount?: number
           payment_date?: string
           payment_transaction_id?: string | null
+          surplus_transaction_id?: string | null
           transaction_id?: string
           updated_at?: string
           user_id?: string
@@ -173,6 +176,13 @@ export type Database = {
           {
             foreignKeyName: "credit_card_payments_payment_transaction_id_fkey"
             columns: ["payment_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_card_payments_surplus_transaction_id_fkey"
+            columns: ["surplus_transaction_id"]
             isOneToOne: false
             referencedRelation: "transactions"
             referencedColumns: ["id"]

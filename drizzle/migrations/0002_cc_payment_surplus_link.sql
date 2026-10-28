@@ -1,0 +1,1 @@
+ALTER TABLE public.credit_card_payments ADD COLUMN IF NOT EXISTS surplus_transaction_id uuid REFERENCES public.transactions(id) ON DELETE SET NULL;
