@@ -47,7 +47,6 @@ export const nonSpendingTypes: TxType[] = [
   "loan_given",
   "loan_received",
   "internal_loan_repayment",
-  "surplus_payment",
 ];
 
 export interface CategoryRow { id: string; name: string; monthly_limit: number; bucket: string }
