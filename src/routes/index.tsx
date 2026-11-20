@@ -1,11 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, AlertTriangle, Lock } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, ChevronLeft, ChevronRight, Lock, Minus, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { fetchAll, seedIfEmpty, formatINR } from "@/lib/finance-db";
-import { PageHeader } from "@/components/finance/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { RecurringPanel } from "@/components/finance/recurring-panel";
@@ -15,8 +14,12 @@ import { fetchClosures, monthKey, lastDayOfMonth } from "@/lib/month-close";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Dashboard — Ledger" },
-      { name: "description", content: "This month's income, spending, fund contributions, and where the rest went." },
+      { title: "Dashboard — Kanakku Vazhakku" },
+      { name: "description", content: "A monthly view of income, spending, savings goals, budgets, and remaining allocations." },
+      { property: "og:title", content: "Dashboard — Kanakku Vazhakku" },
+      { property: "og:description", content: "A monthly view of income, spending, savings goals, budgets, and remaining allocations." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   component: Dashboard,
@@ -24,7 +27,7 @@ export const Route = createFileRoute("/")({
 
 type Level =
   | { name: "l1" }
-  | { name: "l2"; bucket: "regular" | "sip" | "funds" | "fixed" | "others" }
+  | { name: "l2"; bucket: "regular" | "sip" | "funds" | "fixed" | "tax" | "others" }
   | { name: "l3"; categoryId: string };
 
 function Dashboard() {
@@ -65,6 +68,7 @@ function Dashboard() {
 
   const [level, setLevel] = useState<Level>({ name: "l1" });
   const [closeOpen, setCloseOpen] = useState(false);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
 
   const today = new Date();
   const curYear = today.getFullYear();
@@ -222,92 +226,242 @@ function Dashboard() {
     { bucket: "Others", planned: 0, actual: actualOthers },
   ];
 
+  const daysInMonth = lastDay.getDate();
+  const elapsedDays = today.getDate();
+  const daysRemaining = daysInMonth - elapsedDays + 1;
+  const actualIncome = monthTx
+    .filter((t) => t.type === "income")
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+  const previousMonth = month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+  const previousMonthPrefix = `${previousMonth.year}-${String(previousMonth.month).padStart(2, "0")}`;
+  const previousMonthTx = (data.transactions ?? []).filter((t) => t.date.startsWith(previousMonthPrefix));
+  const previousBucketTotals: Record<string, number> = {};
+  for (const t of previousMonthTx) {
+    if (t.bucket) previousBucketTotals[t.bucket] = (previousBucketTotals[t.bucket] ?? 0) + Number(t.amount);
+  }
+  const creditCardOutstanding = (data.transactions ?? [])
+    .filter((t) => t.is_credit_card && t.credit_card_payment_status !== "paid")
+    .reduce((sum, t) => sum + Math.max(0, Number(t.amount) - Number(t.credit_card_paid_amount ?? 0)), 0);
+  const projectedRegular = elapsedDays > 0 ? (actualRegular / elapsedDays) * daysInMonth : 0;
+  const dailyAllowance = daysRemaining > 0 ? (plannedRegular - actualRegular) / daysRemaining : 0;
+  const bucketRows: DashboardBucket[] = [
+    { key: "regular", label: "Regular Expenses", actual: actualRegular, planned: plannedRegular },
+    { key: "sip", label: "SIP Investments", actual: actualSIP, planned: plannedSIP },
+    { key: "funds", label: "Fund Contributions", actual: actualFunds, planned: plannedFundsTotal },
+    { key: "fixed", label: "Fixed Commitments", actual: actualFixed, planned: plannedFixed },
+    { key: "tax", label: "Tax Reserve", actual: actualTax, planned: plannedTax },
+    { key: "others", label: "Others", actual: actualOthers, planned: 0 },
+  ];
+
+  const expectedItems: ExpectedItem[] = [];
+  if (isCurrentMonth) {
+    for (const investment of activeInvestments) {
+      const remaining = Math.max(0, Number(investment.monthly_amount ?? 0) - (actualSIPByInvestment[investment.id] ?? 0));
+      if (remaining > 0) expectedItems.push({ label: investment.name, amount: remaining, bucket: "sip" });
+    }
+    for (const fund of funds) {
+      const target = fund.code === "corpus"
+        ? Number(planData.plan?.planned_corpus_contribution ?? 0)
+        : fund.code === "trip"
+          ? Number(planData.plan?.planned_trip_contribution ?? 0)
+          : Number(fund.monthly_target ?? 0);
+      const remaining = Math.max(0, target - (contribByFund[fund.id] ?? 0));
+      if (remaining > 0) expectedItems.push({ label: fund.name, amount: remaining, bucket: "funds" });
+    }
+    const fixedExpected = [
+      { label: "Car EMI", amount: Math.max(0, plannedCarEmi - (carEmiCat ? spentByCategory[carEmiCat.id] ?? 0 : 0)), bucket: "fixed" as const },
+      ...(maintenanceDue ? [{ label: "Flat Maintenance", amount: Math.max(0, plannedMaintenance - (maintenanceCat ? spentByCategory[maintenanceCat.id] ?? 0 : 0)), bucket: "fixed" as const }] : []),
+      ...extraFixedCategories.map((category) => ({
+        label: category.name,
+        amount: Math.max(0, Number(category.monthly_limit ?? 0) - (spentByCategory[category.id] ?? 0)),
+        bucket: "fixed" as const,
+      })),
+    ];
+    expectedItems.push(...fixedExpected.filter((item) => item.amount > 0));
+    if (plannedTax > actualTax) expectedItems.push({ label: "Tax Reserve", amount: plannedTax - actualTax, bucket: "tax" });
+  }
+  const stillExpected = expectedItems.reduce((sum, item) => sum + item.amount, 0);
+  const trulyUnallocated = unallocated - stillExpected;
+  const significantRemainder = isCurrentMonth && plannedIncome > 0 && Math.abs(trulyUnallocated) >= plannedIncome * 0.05;
+
+  const categoryInsights = categories.flatMap((category) => {
+    const spent = spentByCategory[category.id] ?? 0;
+    const limit = Number(category.monthly_limit ?? 0);
+    const categoryBucket = category.bucket === "Fixed Commitments" ? "fixed" as const : "regular" as const;
+    const target: Level = { name: "l3", categoryId: category.id };
+    const items: InsightItem[] = [];
+    if (isCurrentMonth && limit > 0 && spent / limit >= 0.75 && daysInMonth - elapsedDays + 1 > daysInMonth / 3) {
+      items.push({
+        title: `${category.name} has used ${Math.round((spent / limit) * 100)}% of its limit`,
+        detail: `${formatINR(spent)} of ${formatINR(limit)} with more than a third of the month remaining.`,
+        tone: "warning", target, priority: 1,
+      });
+    }
+    if (isCurrentMonth) {
+      let priorTotal = 0;
+      for (let offset = 1; offset <= 3; offset += 1) {
+        const date = new Date(year, month - 1 - offset, 1);
+        const prefix = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+        priorTotal += (data.transactions ?? [])
+          .filter((t) => t.date.startsWith(prefix) && t.category_id === category.id && (t.type === "expense" || t.type === "internal_loan_repayment"))
+          .reduce((sum, t) => sum + Number(t.amount), 0);
+      }
+      const average = priorTotal / 3;
+      if (average > 0 && spent > average * 1.3) {
+        items.push({
+          title: `${category.name} is above its recent average`,
+          detail: `${formatINR(spent)} so far, versus a three-month average of ${formatINR(average)}.`,
+          tone: "neutral", target, priority: 3,
+        });
+      }
+    }
+    void categoryBucket;
+    return items;
+  });
+
+  const insights: InsightItem[] = isCurrentMonth
+    ? [
+        {
+          title: projectedRegular > plannedRegular ? "Regular spending is projected over budget" : "Regular spending is within its monthly plan",
+          detail: `At this pace, regular expenses are projected at ${formatINR(projectedRegular)} against ${formatINR(plannedRegular)} planned.`,
+          tone: projectedRegular > plannedRegular ? "warning" : "positive", target: { name: "l2", bucket: "regular" }, priority: projectedRegular > plannedRegular ? 0 : 4,
+        },
+        ...categoryInsights,
+        {
+          title: actualOthers > 0 ? "Unbudgeted spending has been recorded" : "No unbudgeted spending recorded",
+          detail: actualOthers > 0
+            ? `${formatINR(actualOthers)} in Others${previousBucketTotals.Others !== undefined ? `, compared with ${formatINR(previousBucketTotals.Others)} last month` : ""}.`
+            : "Others has no planned amount and is currently at zero.",
+          tone: actualOthers > 0 ? "neutral" : "positive", target: { name: "l2", bucket: "others" }, priority: actualOthers > 0 ? 2 : 5,
+        },
+        {
+          title: stillExpected > 0 ? `${expectedItems.length} planned items are still expected` : "All planned bucket items are logged",
+          detail: stillExpected > 0 ? `${formatINR(stillExpected)} remains across planned SIPs, funds, fixed items, and tax reserve.` : "No remaining planned bucket allocations were found.",
+          tone: stillExpected > 0 ? "neutral" : "positive", target: { name: "l2", bucket: "funds" }, priority: stillExpected > 0 ? 3 : 5,
+        },
+        ...(creditCardOutstanding > 0 ? [{
+          title: "Credit card balance is still outstanding",
+          detail: `${formatINR(creditCardOutstanding)} remains unpaid across card transactions.`,
+          tone: "warning" as const, target: { name: "l2" as const, bucket: "others" as const }, priority: 1,
+        }] : []),
+      ]
+    : [
+        {
+          title: `${monthLabel} closed ${unallocated >= 0 ? "with money unallocated" : "over planned income"}`,
+          detail: `Final unallocated amount: ${formatINR(unallocated)}.`,
+          tone: unallocated < 0 ? "warning" : "neutral", target: { name: "l1" }, priority: 0,
+        },
+        {
+          title: actualOthers > 0 ? "Unbudgeted spending was recorded" : "No unbudgeted spending was recorded",
+          detail: `${formatINR(actualOthers)} in Others, versus ${formatINR(previousBucketTotals.Others ?? 0)} in the prior month.`,
+          tone: actualOthers > 0 ? "neutral" : "positive", target: { name: "l2", bucket: "others" }, priority: 2,
+        },
+        {
+          title: actualRegular <= plannedRegular ? "Regular Expenses stayed within plan" : "Regular Expenses exceeded plan",
+          detail: `${formatINR(actualRegular)} actual against ${formatINR(plannedRegular)} planned.`,
+          tone: actualRegular > plannedRegular ? "warning" : "positive", target: { name: "l2", bucket: "regular" }, priority: actualRegular > plannedRegular ? 1 : 3,
+        },
+      ];
+  const visibleInsights = insights.sort((a, b) => a.priority - b.priority).slice(0, 5);
+
   const go = (l: Level) => setLevel(l);
 
   return (
-    <div>
-      <PageHeader
-        title="Dashboard"
-        description="Monthly income and how every rupee is being allocated."
-      />
-
-      {/* Month navigator */}
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-1">
+    <div
+      className="space-y-6"
+      onTouchStart={(event) => { touchStart.current = { x: event.changedTouches[0]?.clientX ?? 0, y: event.changedTouches[0]?.clientY ?? 0 }; }}
+      onTouchEnd={(event) => {
+        const start = touchStart.current;
+        touchStart.current = null;
+        const end = event.changedTouches[0];
+        if (!start || !end) return;
+        const dx = end.clientX - start.x;
+        const dy = end.clientY - start.y;
+        if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+          if (dx > 0) prevMonth();
+          else nextMonth();
+        }
+      }}
+    >
+      <section className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+        <div className="flex min-w-0 items-center gap-1">
           <Button variant="ghost" size="icon" onClick={prevMonth} aria-label="Previous month">
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-5 w-5" />
           </Button>
-          <div className="min-w-40 text-center">
-            <span className="text-sm font-medium">{monthLabel}</span>
-            {isClosed ? (
-              <span className="ml-2 inline-flex items-center rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
-                Closed ✓
-              </span>
-            ) : null}
+          <div className="min-w-0 text-center">
+            <h1 className="text-xl font-semibold">{monthLabel}</h1>
+            {isCurrentMonth ? <p className="mt-0.5 text-sm text-muted-foreground">Day {elapsedDays} of {daysInMonth}</p> : null}
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={nextMonth}
-            disabled={isCurrentMonth}
-            aria-label="Next month"
-          >
-            <ChevronRight className="h-4 w-4" />
+          {isClosed ? <span className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-sm bg-success/10 px-2 py-1 text-xs font-medium text-success"><CheckCircle2 className="h-3.5 w-3.5" /> Closed ✓</span> : null}
+          <Button variant="ghost" size="icon" onClick={nextMonth} disabled={isCurrentMonth} aria-label="Next month">
+            <ChevronRight className="h-5 w-5" />
           </Button>
         </div>
-        {canClose ? (
-          <Button size="sm" variant="outline" onClick={() => setCloseOpen(true)}>
-            <Lock className="mr-1.5 h-3.5 w-3.5" /> Close month
-          </Button>
-        ) : null}
-      </div>
+        {canClose ? <Button variant="outline" onClick={() => setCloseOpen(true)}><Lock className="mr-2 h-4 w-4" />Close month</Button> : null}
+      </section>
 
-      {!isCurrentMonth ? (
-        <div className="mb-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          Viewing {monthLabel} — read only
-        </div>
-      ) : null}
+      {!isCurrentMonth ? <div className="rounded-sm border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">Viewing {monthLabel} — read only</div> : null}
 
       {isCurrentMonth && level.name === "l1" ? <RecurringPanel /> : null}
 
-      {/* Sticky planned-income header — persists across all levels */}
-      <Card className="mb-6 sticky top-2 z-10 backdrop-blur bg-card/95">
-        <CardContent className="pt-5 pb-5 flex items-baseline justify-between gap-4">
-          <div>
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Planned monthly income</div>
-            <div className="mt-1 text-3xl font-semibold tabular-nums tracking-tight">
-              {formatINR(plannedIncome)}
+      {level.name === "l1" ? (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          <section aria-label="Monthly summary" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Income this month" value={formatINR(actualIncome)} detail={`Planned ${formatINR(plannedIncome)}`} />
+            <StatCard label="Spent so far" value={formatINR(totalAllocated)} detail="All six buckets, including Others" />
+            {isCurrentMonth ? (
+              <>
+                <StatCard label="Daily allowance left" value={formatINR(dailyAllowance)} detail={`${daysRemaining} day${daysRemaining === 1 ? "" : "s"} remaining`} warning={dailyAllowance < 0} />
+                <StatCard label="Projected month-end" value={formatINR(projectedRegular)} detail={`${projectedRegular > plannedRegular ? "Over" : "Within"} Regular Expenses plan · ${formatINR(plannedRegular)}`} warning={projectedRegular > plannedRegular} />
+              </>
+            ) : (
+              <>
+                <StatCard label="Regular Expenses" value={formatINR(actualRegular)} detail={`Final actual · ${formatINR(plannedRegular)} planned`} warning={actualRegular > plannedRegular} />
+                <StatCard label="Unallocated" value={formatINR(unallocated)} detail="Final month figure" warning={unallocated < 0} />
+              </>
+            )}
+          </section>
+
+          <InsightsPanel insights={visibleInsights} onSelect={go} />
+
+          <AllocationOverview rows={bucketRows} plannedIncome={plannedIncome} onSelect={(key) => go({ name: "l2", bucket: key })} />
+
+          <ExpectedSummary
+            items={expectedItems}
+            total={stillExpected}
+            remainder={isCurrentMonth ? trulyUnallocated : unallocated}
+            isCurrentMonth={isCurrentMonth}
+            significant={significantRemainder}
+            onSelect={(bucket) => go({ name: "l2", bucket })}
+          />
+
+          <section aria-labelledby="bucket-cards-heading">
+            <div className="mb-3 flex items-end justify-between gap-3">
+              <div>
+                <h2 id="bucket-cards-heading" className="text-lg font-semibold">Buckets</h2>
+                <p className="text-sm text-muted-foreground">Planned allocations and actual spending</p>
+              </div>
             </div>
-            <div className="text-xs text-muted-foreground mt-0.5">from Setup · salary + net rent</div>
-          </div>
-          <div className="text-right">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Allocated so far</div>
-            <div className="mt-1 text-lg font-semibold tabular-nums">{formatINR(totalAllocated)}</div>
-            <div className={"text-xs tabular-nums mt-0.5 " + (remainderMissing ? "text-warning" : "text-muted-foreground")}>
-              {formatINR(Math.max(0, unallocated))} unallocated
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
+              {bucketRows.map((row) => (
+                <BucketSummaryCard
+                  key={row.key}
+                  row={row}
+                  previousActual={previousBucketTotals[row.label] ?? 0}
+                  day={elapsedDays}
+                  days={daysInMonth}
+                  showPacing={isCurrentMonth && row.key !== "others"}
+                  onClick={() => go({ name: "l2", bucket: row.key })}
+                />
+              ))}
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </section>
+        </div>
+      ) : null}
 
       <div key={level.name + ("bucket" in level ? level.bucket : "") + ("categoryId" in level ? level.categoryId : "")}
-           className="animate-in fade-in slide-in-from-right-2 duration-200">
-        {level.name === "l1" ? (
-          <Level1
-            rows={[
-              { key: "regular", label: "Regular Expenses", sub: "HDFC→CUB spending allocation", actual: actualRegular, planned: plannedRegular, drill: true },
-              { key: "sip", label: "SIP Investments", sub: `${activeInvestments.length} active SIP${activeInvestments.length === 1 ? "" : "s"} from HDFC`, actual: actualSIP, planned: plannedSIP, drill: investments.length > 0 },
-              { key: "funds", label: "Fund Contributions", sub: "Corpus + Trip (held inside SBI)", actual: actualFunds, planned: plannedFundsTotal, drill: true },
-              { key: "fixed", label: "Fixed Commitments", sub: maintenanceDue ? "Car EMI + Flat Maintenance (due)" : "Car EMI · Flat Maintenance not due", actual: actualFixed, planned: plannedFixed, drill: true },
-              { key: "tax", label: "Tax Reserve", sub: "Monthly accrual inside SBI", actual: actualTax, planned: plannedTax, drill: false },
-              { key: "others", label: "Others", sub: "Unbudgeted · your own categories", actual: actualOthers, planned: 0, drill: true },
-            ]}
-            onDrill={(key) => go({ name: "l2", bucket: key as "regular" | "sip" | "funds" | "fixed" | "others" })}
-            unallocated={unallocated}
-            plannedUnallocated={plannedUnallocated}
-            remainderMissing={remainderMissing}
-          />
-        ) : level.name === "l2" && level.bucket === "regular" ? (
+           className={level.name === "l1" ? "hidden" : "animate-in fade-in slide-in-from-right-2 duration-200"}>
+        {level.name === "l2" && level.bucket === "regular" ? (
           <Level2Regular
             categories={regularCategories}
             spentByCategory={spentByCategory}
@@ -344,6 +498,8 @@ function Dashboard() {
             nextMaintenanceMonth={nextMaintenanceMonth}
             onBack={() => go({ name: "l1" })}
           />
+        ) : level.name === "l2" && level.bucket === "tax" ? (
+          <Level2Tax transactions={monthTx.filter((t) => t.bucket === "Tax Reserve")} actual={actualTax} planned={plannedTax} onBack={() => go({ name: "l1" })} />
         ) : level.name === "l2" && level.bucket === "others" ? (
           <div>
             <BackBar label="Others" onBack={() => go({ name: "l1" })} />
@@ -386,6 +542,183 @@ function Dashboard() {
         figures={closeFigures}
         accounts={data.accounts}
       />
+    </div>
+  );
+}
+
+interface DashboardBucket {
+  key: "regular" | "sip" | "funds" | "fixed" | "tax" | "others";
+  label: string;
+  actual: number;
+  planned: number;
+}
+
+interface ExpectedItem {
+  label: string;
+  amount: number;
+  bucket: DashboardBucket["key"];
+}
+
+interface InsightItem {
+  title: string;
+  detail: string;
+  tone: "warning" | "positive" | "neutral";
+  target: Level;
+  priority: number;
+}
+
+function StatCard({ label, value, detail, warning = false }: { label: string; value: string; detail: string; warning?: boolean }) {
+  return (
+    <Card className="min-w-0">
+      <CardContent className="p-4 sm:p-5">
+        <div className="text-sm text-muted-foreground">{label}</div>
+        <div className={"mt-2 break-words text-2xl font-semibold tabular-nums " + (warning ? "text-destructive" : "")}>{value}</div>
+        <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function InsightsPanel({ insights, onSelect }: { insights: InsightItem[]; onSelect: (level: Level) => void }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-base"><Sparkles className="h-4 w-4 text-primary" />Insights</CardTitle>
+      </CardHeader>
+      <CardContent className="divide-y divide-border">
+        {insights.map((insight, index) => (
+          <Button
+            key={`${insight.title}-${index}`}
+            variant="ghost"
+            onClick={() => onSelect(insight.target)}
+            className="h-auto min-h-16 w-full justify-start gap-3 whitespace-normal rounded-none px-1 py-3 text-left"
+            title={`${insight.title}. ${insight.detail}`}
+          >
+            {insight.tone === "warning" ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" /> : insight.tone === "positive" ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" /> : <Minus className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium">{insight.title}</span>
+              <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{insight.detail}</span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          </Button>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AllocationOverview({ rows, plannedIncome, onSelect }: { rows: DashboardBucket[]; plannedIncome: number; onSelect: (key: DashboardBucket["key"]) => void }) {
+  const scale = Math.max(1, plannedIncome, ...rows.map((row) => Math.max(row.planned, row.actual)));
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <CardTitle className="text-base">Allocation overview</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">Planned and actual amounts across monthly income</p>
+          </div>
+          <div className="flex gap-4 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-primary" />Planned</span><span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-chart-2" />Actual</span></div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-1">
+        {rows.map((row) => (
+          <Button key={row.key} variant="ghost" onClick={() => onSelect(row.key)} className="h-auto min-h-[4.5rem] w-full justify-start rounded-sm px-2 py-2 text-left" title={`${row.label}: ${formatINR(row.actual)} actual, ${row.planned > 0 ? `${formatINR(row.planned)} planned` : "unbudgeted"}`}>
+            <span className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 sm:grid-cols-[minmax(8rem,0.9fr)_minmax(0,2fr)_auto]">
+              <span className="truncate text-sm font-medium">{row.label}{row.key === "others" ? <span className="ml-1 text-xs font-normal text-muted-foreground">· Unbudgeted</span> : null}</span>
+              <span className="col-span-2 grid gap-1.5 sm:col-span-1">
+                <span className="flex h-1.5 overflow-hidden rounded-full bg-muted"><span className="rounded-full bg-primary" style={{ width: `${Math.min(100, (row.planned / scale) * 100)}%` }} /></span>
+                <span className="flex h-1.5 overflow-hidden rounded-full bg-muted"><span className="rounded-full bg-chart-2" style={{ width: `${Math.min(100, (row.actual / scale) * 100)}%` }} /></span>
+              </span>
+              <span className="row-span-2 text-right text-xs tabular-nums text-muted-foreground sm:row-span-1">{formatINR(row.actual)}{row.planned > 0 ? <span className="block sm:inline"> / {formatINR(row.planned)}</span> : null}</span>
+            </span>
+          </Button>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ExpectedSummary({ items, total, remainder, isCurrentMonth, significant, onSelect }: { items: ExpectedItem[]; total: number; remainder: number; isCurrentMonth: boolean; significant: boolean; onSelect: (bucket: DashboardBucket["key"]) => void }) {
+  return (
+    <Card>
+      <CardContent className="grid gap-5 p-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(12rem,0.8fr)] sm:p-5">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">{isCurrentMonth ? "Still expected this month" : "Final unallocated"}</div>
+          {isCurrentMonth ? (
+            <>
+              <div className="mt-1 text-2xl font-semibold tabular-nums">{formatINR(total)}</div>
+              <div className="mt-3 divide-y divide-border">
+                {items.length ? items.map((item) => (
+                  <Button key={`${item.bucket}-${item.label}`} variant="ghost" onClick={() => onSelect(item.bucket)} className="h-auto min-h-10 w-full justify-between gap-3 rounded-none px-1 py-2 text-left">
+                    <span className="truncate text-sm">{item.label}</span><span className="shrink-0 text-sm tabular-nums">{formatINR(item.amount)}</span>
+                  </Button>
+                )) : <p className="py-2 text-sm text-muted-foreground">No planned bucket items remain unlogged.</p>}
+              </div>
+            </>
+          ) : <p className="mt-1 text-sm text-muted-foreground">Past months show the final remainder only.</p>}
+        </div>
+        <div className="border-t border-border pt-4 sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
+          <div className="flex items-center gap-2 text-sm font-semibold">{significant ? <AlertTriangle className="h-4 w-4 text-warning" /> : null}{isCurrentMonth ? "Truly unallocated" : "Unallocated"}</div>
+          <div className={"mt-2 text-2xl font-semibold tabular-nums " + (significant ? "text-warning" : "")}>{formatINR(remainder)}</div>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{isCurrentMonth ? "Planned income less recorded and still-expected allocations." : "Planned income less the month's recorded allocations."}</p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BucketSummaryCard({ row, previousActual, day, days, showPacing, onClick }: { row: DashboardBucket; previousActual: number; day: number; days: number; showPacing: boolean; onClick: () => void }) {
+  const difference = row.actual - previousActual;
+  const isOthers = row.key === "others";
+  const aheadOfPace = row.planned > 0 && showPacing && row.actual > (row.planned * day / days) * 1.1 && row.actual <= row.planned;
+  const overPace = row.planned > 0 && row.actual > row.planned;
+  const status = overPace ? "Over pace" : aheadOfPace ? "Ahead of pace" : "On track";
+  return (
+    <Button variant="outline" onClick={onClick} className="h-auto min-h-40 w-full flex-col items-stretch justify-start gap-3 whitespace-normal p-4 text-left transition-colors hover:border-primary">
+      <span className="flex w-full min-w-0 items-start justify-between gap-3">
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-semibold">{row.label}</span>
+          {isOthers ? <span className="mt-0.5 block text-xs text-muted-foreground">Unbudgeted spend</span> : null}
+        </span>
+        {showPacing && !isOthers ? <span className={"shrink-0 text-xs font-medium " + (overPace ? "text-destructive" : aheadOfPace ? "text-warning" : "text-success")}>{status}</span> : null}
+      </span>
+      <span className="w-full">
+        <span className="block text-xl font-semibold tabular-nums">{formatINR(row.actual)}{row.planned > 0 ? <span className="text-sm font-normal text-muted-foreground"> / {formatINR(row.planned)}</span> : null}</span>
+        {!isOthers && row.planned > 0 ? <PaceProgress actual={row.actual} planned={row.planned} day={day} days={days} showMarker={showPacing} /> : null}
+      </span>
+      <span className="mt-auto flex w-full items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span className="inline-flex min-w-0 items-center gap-1">
+          {difference > 0 ? <ArrowUpRight className="h-3.5 w-3.5 shrink-0" /> : difference < 0 ? <ArrowDownRight className="h-3.5 w-3.5 shrink-0" /> : <Minus className="h-3.5 w-3.5 shrink-0" />}
+          <span className="truncate">{formatINR(Math.abs(difference))} {difference === 0 ? "unchanged" : difference > 0 ? "more" : "less"} vs last month</span>
+        </span>
+        <ChevronRight className="h-4 w-4 shrink-0" />
+      </span>
+    </Button>
+  );
+}
+
+function PaceProgress({ actual, planned, day, days, showMarker }: { actual: number; planned: number; day: number; days: number; showMarker: boolean }) {
+  const fill = planned > 0 ? Math.min(100, Math.max(0, (actual / planned) * 100)) : 0;
+  const marker = days > 0 ? Math.min(100, Math.max(0, (day / days) * 100)) : 0;
+  return (
+    <span className="relative mt-3 block h-2 rounded-full bg-muted" aria-label={`Progress ${Math.round(fill)} percent${showMarker ? `; today marker at ${Math.round(marker)} percent` : ""}`}>
+      <span className="absolute inset-y-0 left-0 rounded-full bg-primary transition-all" style={{ width: `${fill}%` }} />
+      {showMarker ? <span className="absolute -top-1 h-4 w-0.5 -translate-x-1/2 rounded-full bg-foreground" style={{ left: `${marker}%` }} /> : null}
+    </span>
+  );
+}
+
+function Level2Tax({ transactions, actual, planned, onBack }: { transactions: Array<{ id: string; date: string; description: string; amount: number }>; actual: number; planned: number; onBack: () => void }) {
+  const sorted = [...transactions].sort((a, b) => b.date.localeCompare(a.date));
+  return (
+    <div>
+      <BackBar label="Tax Reserve" onBack={onBack} />
+      <SummaryStrip label="Tax Reserve" actual={actual} planned={planned} />
+      <Card className="mt-4">
+        <CardContent className="pt-4">
+          {sorted.length ? <ul className="divide-y divide-border">{sorted.map((transaction) => <li key={transaction.id} className="flex items-center justify-between gap-4 py-3"><span className="min-w-0"><span className="block text-sm font-medium">{transaction.description || "Tax reserve accrual"}</span><span className="text-xs text-muted-foreground">{formatDate(transaction.date)}</span></span><span className="shrink-0 text-sm font-medium tabular-nums">{formatINR(transaction.amount)}</span></li>)}</ul> : <p className="py-5 text-sm text-muted-foreground">No Tax Reserve transactions this month.</p>}
+        </CardContent>
+      </Card>
     </div>
   );
 }
