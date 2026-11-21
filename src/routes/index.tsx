@@ -1,12 +1,19 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, ChevronLeft, ChevronRight, Lock, Minus, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, ChevronLeft, ChevronRight, Lock, Minus, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { fetchAll, seedIfEmpty, formatINR } from "@/lib/finance-db";
+import { computeFundBalance, computeReserveBalance, fetchAll, seedIfEmpty, formatINR, type AccountRow, type CategoryRow, type FundRow, type ReserveRow, type TxRow } from "@/lib/finance-db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { deleteCreditCardTransaction } from "@/components/finance/credit-card-payment-dialog";
 import { RecurringPanel } from "@/components/finance/recurring-panel";
 import { CloseMonthDialog, type BucketFigure } from "@/components/finance/close-month-dialog";
 import { fetchClosures, monthKey, lastDayOfMonth } from "@/lib/month-close";
@@ -28,7 +35,7 @@ export const Route = createFileRoute("/")({
 type Level =
   | { name: "l1" }
   | { name: "l2"; bucket: "regular" | "sip" | "funds" | "fixed" | "tax" | "others" }
-  | { name: "l3"; categoryId: string };
+  | { name: "l3"; bucket: DashboardBucket["key"]; subCategory: string };
 
 function Dashboard() {
   const { session, user, loading } = useAuth();
@@ -288,7 +295,7 @@ function Dashboard() {
     const spent = spentByCategory[category.id] ?? 0;
     const limit = Number(category.monthly_limit ?? 0);
     const categoryBucket = category.bucket === "Fixed Commitments" ? "fixed" as const : "regular" as const;
-    const target: Level = { name: "l3", categoryId: category.id };
+    const target: Level = { name: "l3", bucket: categoryBucket, subCategory: category.name };
     const items: InsightItem[] = [];
     if (isCurrentMonth && limit > 0 && spent / limit >= 0.75 && daysInMonth - elapsedDays + 1 > daysInMonth / 3) {
       items.push({
@@ -315,7 +322,6 @@ function Dashboard() {
         });
       }
     }
-    void categoryBucket;
     return items;
   });
 
@@ -459,75 +465,70 @@ function Dashboard() {
         </div>
       ) : null}
 
-      <div key={level.name + ("bucket" in level ? level.bucket : "") + ("categoryId" in level ? level.categoryId : "")}
+      <div key={level.name + ("bucket" in level ? level.bucket : "") + ("subCategory" in level ? level.subCategory : "") + monthPrefix}
            className={level.name === "l1" ? "hidden" : "animate-in fade-in slide-in-from-right-2 duration-200"}>
-        {level.name === "l2" && level.bucket === "regular" ? (
-          <Level2Regular
-            categories={regularCategories}
-            spentByCategory={spentByCategory}
-            plannedRegular={plannedRegular}
-            actualRegular={actualRegular}
-            onBack={() => go({ name: "l1" })}
-            onCategory={(id) => go({ name: "l3", categoryId: id })}
-          />
-        ) : level.name === "l2" && level.bucket === "sip" ? (
-          <Level2SIP
-            investments={investments}
-            actualByInvestment={actualSIPByInvestment}
-            plannedSIP={plannedSIP}
-            actualSIP={actualSIP}
-            onBack={() => go({ name: "l1" })}
-          />
-        ) : level.name === "l2" && level.bucket === "funds" ? (
-          <Level2Funds
+        {level.name === "l2" ? (
+          <BucketDetailView
+            bucket={level.bucket}
+            label={bucketRows.find((row) => row.key === level.bucket)?.label ?? "Bucket"}
+            monthTx={monthTx}
+            allTransactions={data.transactions}
+            accounts={[...data.accounts, ...(data.creditCardAccount ? [data.creditCardAccount] : [])]}
+            categories={categories}
             funds={funds}
-            contribByFund={contribByFund}
-            planned={{ corpus: Number(planData.plan?.planned_corpus_contribution ?? 0), trip: Number(planData.plan?.planned_trip_contribution ?? 0) }}
-            onBack={() => go({ name: "l1" })}
-          />
-        ) : level.name === "l2" && level.bucket === "fixed" ? (
-          <Level2Fixed
-            carEmi={{ actual: carEmiCat ? spentByCategory[carEmiCat.id] ?? 0 : 0, planned: plannedCarEmi }}
-            maintenance={{ actual: maintenanceCat ? spentByCategory[maintenanceCat.id] ?? 0 : 0, planned: plannedMaintenance }}
-            extras={extraFixedCategories.map((c) => ({
-              label: c.name,
-              planned: Number(c.monthly_limit ?? 0),
-              actual: spentByCategory[c.id] ?? 0,
-            }))}
+            reserves={data.reserves}
+            investments={investments}
+            plannedRegular={plannedRegular}
+            plannedSIP={plannedSIP}
+            plannedFunds={plannedFundsTotal}
+            plannedFixed={plannedFixed}
+            plannedTax={plannedTax}
+            plannedCarEmi={plannedCarEmi}
+            plannedMaintenance={plannedMaintenance}
+            plannedCorpus={Number(planData.plan?.planned_corpus_contribution ?? 0)}
+            plannedTrip={Number(planData.plan?.planned_trip_contribution ?? 0)}
             maintenanceDue={maintenanceDue}
             nextMaintenanceMonth={nextMaintenanceMonth}
+            year={year}
+            month={month}
+            day={elapsedDays}
+            isCurrentMonth={isCurrentMonth}
+            isClosed={isClosed}
+            userId={user!.id}
             onBack={() => go({ name: "l1" })}
+            onSelectSubCategory={(subCategory) => go({ name: "l3", bucket: level.bucket, subCategory })}
+            onRefresh={() => dataQuery.refetch()}
           />
-        ) : level.name === "l2" && level.bucket === "tax" ? (
-          <Level2Tax transactions={monthTx.filter((t) => t.bucket === "Tax Reserve")} actual={actualTax} planned={plannedTax} onBack={() => go({ name: "l1" })} />
-        ) : level.name === "l2" && level.bucket === "others" ? (
-          <div>
-            <BackBar label="Others" onBack={() => go({ name: "l1" })} />
-            <Card>
-              <CardContent className="pt-4 divide-y divide-border">
-                {monthTx.filter((t) => t.bucket === "Others").length === 0 ? (
-                  <div className="py-6 text-sm text-muted-foreground">No Others transactions this month.</div>
-                ) : monthTx.filter((t) => t.bucket === "Others").map((t) => (
-                  <div key={t.id} className="py-3 flex items-baseline justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium">{t.sub_category || "Others"}</div>
-                      <div className="text-xs text-muted-foreground truncate">{t.date}{t.description ? " · " + t.description : ""}</div>
-                    </div>
-                    <div className="text-sm font-medium tabular-nums">{formatINR(Number(t.amount))}</div>
-                  </div>
-                ))}
-                <div className="py-3 flex justify-between text-sm font-semibold">
-                  <span>Total</span><span className="tabular-nums">{formatINR(actualOthers)}</span>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
         ) : level.name === "l3" ? (
-          <Level3
-            category={categories.find((c) => c.id === level.categoryId) ?? null}
-            spent={spentByCategory[level.categoryId] ?? 0}
-            txs={monthTx.filter((t) => t.category_id === level.categoryId && (t.type === "expense" || t.type === "internal_loan_repayment"))}
-            onBack={() => go({ name: "l2", bucket: "regular" })}
+          <SubcategoryDetailView
+            bucket={level.bucket}
+            subCategory={level.subCategory}
+            monthTx={monthTx}
+            allTransactions={data.transactions}
+            accounts={[...data.accounts, ...(data.creditCardAccount ? [data.creditCardAccount] : [])]}
+            categories={categories}
+            funds={funds}
+            reserves={data.reserves}
+            investments={investments}
+            plannedRegular={plannedRegular}
+            plannedSIP={plannedSIP}
+            plannedFunds={plannedFundsTotal}
+            plannedFixed={plannedFixed}
+            plannedTax={plannedTax}
+            plannedCarEmi={plannedCarEmi}
+            plannedMaintenance={plannedMaintenance}
+            plannedCorpus={Number(planData.plan?.planned_corpus_contribution ?? 0)}
+            plannedTrip={Number(planData.plan?.planned_trip_contribution ?? 0)}
+            maintenanceDue={maintenanceDue}
+            nextMaintenanceMonth={nextMaintenanceMonth}
+            year={year}
+            month={month}
+            day={elapsedDays}
+            isCurrentMonth={isCurrentMonth}
+            isClosed={isClosed}
+            userId={user!.id}
+            onBack={() => go({ name: "l2", bucket: level.bucket })}
+            onRefresh={() => dataQuery.refetch()}
           />
         ) : null}
       </div>
@@ -721,6 +722,391 @@ function Level2Tax({ transactions, actual, planned, onBack }: { transactions: Ar
       </Card>
     </div>
   );
+}
+
+type DetailBucket = DashboardBucket["key"];
+interface DashboardInvestment { id: string; name: string; goal: string | null; monthly_amount: number; active: boolean }
+interface DetailSubCategory { name: string; planned: number; categoryId?: string; fundId?: string; investmentId?: string; note?: string; muted?: boolean }
+interface DetailProps {
+  bucket: DetailBucket;
+  monthTx: TxRow[];
+  allTransactions: TxRow[];
+  accounts: AccountRow[];
+  categories: CategoryRow[];
+  funds: FundRow[];
+  reserves: ReserveRow[];
+  investments: DashboardInvestment[];
+  plannedRegular: number;
+  plannedSIP: number;
+  plannedFunds: number;
+  plannedFixed: number;
+  plannedTax: number;
+  plannedCarEmi: number;
+  plannedMaintenance: number;
+  plannedCorpus: number;
+  plannedTrip: number;
+  maintenanceDue: boolean;
+  nextMaintenanceMonth: string;
+  year: number;
+  month: number;
+  day: number;
+  isCurrentMonth: boolean;
+  isClosed: boolean;
+  userId: string;
+  onRefresh: () => void;
+}
+
+function bucketLabelFor(key: DetailBucket) {
+  return ({ regular: "Regular Expenses", sip: "SIP Investments", funds: "Fund Contributions", fixed: "Fixed Commitments", tax: "Tax Reserve", others: "Others" })[key];
+}
+
+function subcategoryName(tx: TxRow, categories: CategoryRow[], funds: FundRow[], reserves: ReserveRow[]) {
+  if (tx.sub_category) return tx.sub_category;
+  if (tx.category_id) return categories.find((c) => c.id === tx.category_id)?.name ?? "Uncategorised";
+  if (tx.fund_id) return funds.find((f) => f.id === tx.fund_id)?.name ?? "Fund";
+  if (tx.reserve_id) return reserves.find((r) => r.id === tx.reserve_id)?.name ?? "Reserve";
+  return "Uncategorised";
+}
+
+function buildSubCategories(props: DetailProps): DetailSubCategory[] {
+  const { bucket, categories, funds, investments, plannedCarEmi, plannedMaintenance, plannedCorpus, plannedTrip, plannedTax, maintenanceDue, nextMaintenanceMonth, monthTx } = props;
+  if (bucket === "regular") {
+    return categories
+      .filter((c) => c.bucket === "Regular Expenses" || (!c.bucket && !isFixedName(c.name)))
+      .map((c) => ({ name: c.name, planned: Number(c.monthly_limit ?? 0), categoryId: c.id }));
+  }
+  if (bucket === "sip") return investments.map((i) => ({ name: i.name, planned: i.active === false ? 0 : Number(i.monthly_amount ?? 0), investmentId: i.id, note: i.goal || "Unassigned", muted: i.active === false }));
+  if (bucket === "funds") return funds.map((f) => ({ name: f.name, planned: f.code === "corpus" ? plannedCorpus : f.code === "trip" ? plannedTrip : Number(f.monthly_target ?? 0), fundId: f.id }));
+  if (bucket === "fixed") {
+    const car = categories.find((c) => c.name.trim().toLowerCase() === "car emi");
+    const maintenance = categories.find((c) => ["maintenance", "flat maintenance"].includes(c.name.trim().toLowerCase()));
+    const extras = categories.filter((c) => c.bucket === "Fixed Commitments" && !isFixedName(c.name));
+    return [
+      { name: car?.name ?? "Car EMI", planned: plannedCarEmi, ...(car ? { categoryId: car.id } : {}), note: "Monthly commitment" },
+      { name: maintenance?.name ?? "Flat Maintenance", planned: plannedMaintenance, ...(maintenance ? { categoryId: maintenance.id } : {}), note: maintenanceDue ? "Quarterly · due this month" : `Not due this month · Next due: ${nextMaintenanceMonth}`, muted: !maintenanceDue },
+      ...extras.map((c) => ({ name: c.name, planned: Number(c.monthly_limit ?? 0), categoryId: c.id, note: "Monthly commitment" })),
+    ];
+  }
+  if (bucket === "tax") return [{ name: "Tax Reserve", planned: plannedTax }];
+  const others = [...new Set(monthTx.filter((t) => t.bucket === "Others").map((t) => subcategoryName(t, categories, funds, props.reserves)))];
+  return others.map((name) => ({ name, planned: 0 }));
+}
+
+function isFixedName(name: string) {
+  return ["car emi", "maintenance", "flat maintenance"].includes(name.trim().toLowerCase());
+}
+
+function matchingSubcategory(tx: TxRow, item: DetailSubCategory, categories: CategoryRow[], funds: FundRow[], reserves: ReserveRow[]) {
+  return item.categoryId ? tx.category_id === item.categoryId || subcategoryName(tx, categories, funds, reserves) === item.name
+    : item.fundId ? tx.fund_id === item.fundId || subcategoryName(tx, categories, funds, reserves) === item.name
+      : subcategoryName(tx, categories, funds, reserves) === item.name;
+}
+
+function accountFilterPills(accounts: AccountRow[], available: AccountRow[], selected: string[], setSelected: (ids: string[]) => void) {
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-1" aria-label="Filter by account">
+      {available.map((account) => {
+        const active = selected.includes(account.id);
+        return <Button key={account.id} type="button" size="sm" variant={active ? "secondary" : "outline"} aria-pressed={active} onClick={() => {
+          if (active && selected.length <= 1) return;
+          setSelected(active ? selected.filter((id) => id !== account.id) : [...selected, account.id]);
+        }}>{accounts.find((a) => a.id === account.id)?.name ?? account.name}</Button>;
+      })}
+    </div>
+  );
+}
+
+function makeDailyTrend(transactions: TxRow[], year: number, month: number, planned: number) {
+  const days = new Date(year, month, 0).getDate();
+  const byDay: Record<number, number> = {};
+  for (const tx of transactions) {
+    const date = Number(tx.date.slice(8, 10));
+    byDay[date] = (byDay[date] ?? 0) + Number(tx.amount);
+  }
+  let cumulative = 0;
+  return Array.from({ length: days }, (_, index) => {
+    const day = index + 1;
+    cumulative += byDay[day] ?? 0;
+    return { day, actual: cumulative, ideal: planned * day / days, daily: byDay[day] ?? 0 };
+  });
+}
+
+function selectedSubcategoryActual(transactions: TxRow[], item: DetailSubCategory, categories: CategoryRow[], funds: FundRow[], reserves: ReserveRow[]) {
+  return transactions.filter((tx) => matchingSubcategory(tx, item, categories, funds, reserves)).reduce((sum, tx) => sum + Number(tx.amount), 0);
+}
+
+function BucketDetailView(props: DetailProps & { label: string; onBack: () => void; onSelectSubCategory: (name: string) => void }) {
+  const { bucket, label, monthTx, allTransactions, accounts, categories, funds, reserves, investments, year, month, day, isCurrentMonth, isClosed, onBack, onSelectSubCategory } = props;
+  const items = useMemo(() => buildSubCategories(props), [props]);
+  const bucketLabel = bucketLabelFor(bucket);
+  const bucketTx = monthTx.filter((t) => t.bucket === bucketLabel);
+  const availableAccounts = accounts.filter((account) => bucketTx.some((t) => t.account_id === account.id));
+  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const accountSignature = availableAccounts.map((a) => a.id).join("|");
+  const categorySignature = items.map((i) => i.name).join("|");
+  useEffect(() => setSelectedAccounts(availableAccounts.map((a) => a.id)), [accountSignature]);
+  useEffect(() => setSelectedCategories(items.map((i) => i.name)), [categorySignature]);
+  const accountSet = new Set(selectedAccounts);
+  const categorySet = new Set(selectedCategories);
+  const filtered = bucketTx.filter((tx) => accountSet.has(tx.account_id) && categorySet.has(subcategoryName(tx, categories, funds, reserves)));
+  const selectedItems = items.filter((item) => categorySet.has(item.name));
+  const planned = bucket === "others" ? 0 : selectedItems.reduce((sum, item) => sum + item.planned, 0);
+  const actual = filtered.reduce((sum, tx) => sum + Number(tx.amount), 0);
+  const currentTrend = makeDailyTrend(filtered, year, month, planned);
+  const dayCount = new Date(year, month, 0).getDate();
+  const currentMonthPrefix = `${year}-${String(month).padStart(2, "0")}`;
+  const comparisonRows = selectedItems.map((item) => {
+    const values = [];
+    for (let offset = 0; offset <= 3; offset++) {
+      const d = new Date(year, month - 1 - offset, 1);
+      const prefix = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const txs = allTransactions.filter((tx) => tx.date.startsWith(prefix) && tx.bucket === bucketLabel && accountSet.has(tx.account_id));
+      values.push(selectedSubcategoryActual(txs, item, categories, funds, reserves));
+    }
+    return { name: item.name, current: values[0] ?? 0, last: values[1] ?? 0, average: (values[1] + values[2] + values[3]) / 3 };
+  }).sort((a, b) => b.current - a.current);
+  const spendByAccount = availableAccounts.map((account) => ({ name: account.name, amount: filtered.filter((t) => t.account_id === account.id).reduce((sum, t) => sum + Number(t.amount), 0) })).filter((a) => a.amount > 0);
+  const spendByCategory = selectedItems.map((item) => ({ name: item.name, amount: selectedSubcategoryActual(filtered, item, categories, funds, reserves), planned: item.planned })).sort((a, b) => b.amount - a.amount);
+  const topTransactions = [...filtered].sort((a, b) => Number(b.amount) - Number(a.amount)).slice(0, 5);
+  const editable = isCurrentMonth && !isClosed;
+  const pacing = planned > 0 ? actual > planned ? "Over pace" : actual > planned * day / dayCount * 1.1 ? "Ahead of pace" : "On track" : "Unbudgeted spend";
+  const taxReserve = reserves.find((r) => r.name.toLowerCase().includes("tax"));
+
+  return (
+    <div className="space-y-5 animate-in fade-in slide-in-from-right-2 duration-200">
+      <BackBar label={label} onBack={onBack} />
+      <section className="flex flex-wrap items-end justify-between gap-3">
+        <div><h2 className="text-2xl font-semibold">{label}</h2><p className="mt-1 text-sm text-muted-foreground">{isCurrentMonth ? `Day ${day} of ${dayCount}` : "Read-only month view"}</p></div>
+        <div className="text-right"><div className="text-2xl font-semibold tabular-nums">{formatINR(actual)}{bucket !== "others" ? <span className="text-base font-normal text-muted-foreground"> / {formatINR(planned)}</span> : null}</div><p className={"mt-1 text-sm " + (pacing === "Over pace" ? "text-destructive" : pacing === "Ahead of pace" ? "text-warning" : "text-muted-foreground")}>{pacing}</p></div>
+      </section>
+      {bucket !== "others" && planned > 0 ? <PaceProgress actual={actual} planned={planned} day={day} days={dayCount} showMarker={isCurrentMonth} /> : null}
+
+      <Card><CardContent className="space-y-4 p-4">
+        <div><div className="mb-2 text-xs font-medium uppercase text-muted-foreground">Accounts</div>{availableAccounts.length ? accountFilterPills(accounts, availableAccounts, selectedAccounts, setSelectedAccounts) : <p className="text-sm text-muted-foreground">No transactions for this bucket in the selected month.</p>}</div>
+        <div><div className="mb-2 text-xs font-medium uppercase text-muted-foreground">Sub-categories</div><div className="flex gap-2 overflow-x-auto pb-1">{items.map((item) => {
+          const active = categorySet.has(item.name);
+          return <Button key={item.name} size="sm" variant={active ? "secondary" : "outline"} aria-pressed={active} onClick={() => setSelectedCategories(active ? selectedCategories.filter((name) => name !== item.name) : [...selectedCategories, item.name])}>{item.name}</Button>;
+        })}</div></div>
+      </CardContent></Card>
+
+      {bucket === "funds" ? <FundOverview items={items} funds={funds} transactions={allTransactions} monthTx={bucketTx} onSelect={onSelectSubCategory} /> : null}
+      {bucket === "sip" ? <SipOverview items={items} monthTx={bucketTx} categories={categories} funds={funds} reserves={reserves} onSelect={onSelectSubCategory} /> : null}
+      {bucket === "fixed" ? <FixedOverview items={items} onSelect={onSelectSubCategory} /> : null}
+      {bucket === "tax" ? <TaxOverview reserve={taxReserve} transactions={allTransactions} actual={actual} planned={props.plannedTax} /> : null}
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <DetailChart title="Spend by account" empty="No spending for the selected accounts.">
+          <ResponsiveContainer width="100%" height="100%"><BarChart data={spendByAccount} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}><CartesianGrid vertical={false} stroke="var(--border)" /><XAxis dataKey="name" tickLine={false} axisLine={false} /><YAxis tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} width={64} /><Tooltip formatter={(value) => formatINR(Number(value ?? 0))} /><Bar dataKey="amount" name="Spend" fill="var(--primary)" radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer>
+        </DetailChart>
+        <DetailChart title="Spend by sub-category" empty="No sub-categories match these filters.">
+          <ResponsiveContainer width="100%" height="100%"><BarChart data={spendByCategory} layout="vertical" margin={{ left: 12, right: 16, top: 8, bottom: 8 }}><CartesianGrid horizontal={false} stroke="var(--border)" /><XAxis type="number" tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} /><YAxis type="category" dataKey="name" width={112} tickLine={false} axisLine={false} /><Tooltip formatter={(value) => formatINR(Number(value ?? 0))} /><Bar dataKey="planned" name="Planned" fill="var(--muted-foreground)" radius={[0, 3, 3, 0]} /><Bar dataKey="amount" name="Actual" fill="var(--primary)" radius={[0, 3, 3, 0]} onClick={(row) => onSelectSubCategory(String(row.name))} /></BarChart></ResponsiveContainer>
+        </DetailChart>
+      </div>
+
+      <DetailChart title="Daily cumulative spend" empty="No transactions yet for this month.">
+        <ResponsiveContainer width="100%" height="100%"><LineChart data={currentTrend} margin={{ left: 8, right: 16, top: 10, bottom: 0 }}><CartesianGrid stroke="var(--border)" /><XAxis dataKey="day" tickLine={false} axisLine={false} /><YAxis tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} width={64} /><Tooltip labelFormatter={(v) => `Day ${v}`} formatter={(value) => formatINR(Number(value ?? 0))} /><Line dataKey="actual" name="Actual" type="monotone" stroke="var(--primary)" strokeWidth={2} dot={false} /><Line dataKey="ideal" name="Ideal pace" type="monotone" stroke="var(--chart-3)" strokeDasharray="5 4" dot={false} /></LineChart></ResponsiveContainer>
+      </DetailChart>
+
+      <DetailChart title="This month vs recent months" empty="No sub-category comparison data.">
+        <ResponsiveContainer width="100%" height="100%"><BarChart data={comparisonRows} layout="vertical" margin={{ left: 12, right: 16, top: 8, bottom: 8 }}><CartesianGrid horizontal={false} stroke="var(--border)" /><XAxis type="number" tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} /><YAxis type="category" dataKey="name" width={112} tickLine={false} axisLine={false} /><Tooltip formatter={(value) => formatINR(Number(value ?? 0))} /><Bar dataKey="current" name="Selected month" fill="var(--primary)" radius={[0, 3, 3, 0]} /><Bar dataKey="last" name="Previous month" fill="var(--chart-2)" radius={[0, 3, 3, 0]} /><Bar dataKey="average" name="3-month average" fill="var(--chart-3)" radius={[0, 3, 3, 0]} /></BarChart></ResponsiveContainer>
+      </DetailChart>
+
+      <Card><CardHeader className="pb-2"><CardTitle className="text-base">Top transactions</CardTitle></CardHeader><CardContent>
+        {topTransactions.length ? <TransactionRows transactions={topTransactions} accounts={accounts} categories={categories} funds={funds} reserves={reserves} payments={[]} editable={false} onRefresh={() => undefined} userId={props.userId} /> : <p className="py-4 text-sm text-muted-foreground">No transactions match these filters.</p>}
+      </CardContent></Card>
+      <p className="hidden">{currentMonthPrefix}</p>
+      {editable ? null : <p className="text-xs text-muted-foreground">This month is read-only.</p>}
+    </div>
+  );
+}
+
+function compactINR(value: number) {
+  return new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function DetailChart({ title, empty, children }: { title: string; empty: string; children: React.ReactNode }) {
+  const hasData = React.Children.count(children) > 0;
+  return <Card className="min-w-0"><CardHeader className="pb-2"><CardTitle className="text-base">{title}</CardTitle></CardHeader><CardContent><div className="h-64 min-w-0 w-full">{hasData ? children : <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{empty}</div>}</div></CardContent></Card>;
+}
+
+function FundOverview({ items, funds, transactions, monthTx, onSelect }: { items: DetailSubCategory[]; funds: FundRow[]; transactions: TxRow[]; monthTx: TxRow[]; onSelect: (name: string) => void }) {
+  return <Card><CardHeader className="pb-2"><CardTitle className="text-base">Fund balances and recent movements</CardTitle></CardHeader><CardContent className="grid gap-3 md:grid-cols-2">
+    {items.map((item) => {
+      const fund = funds.find((f) => f.id === item.fundId);
+      if (!fund) return null;
+      const balance = computeFundBalance(fund, transactions);
+      const contributed = monthTx.filter((tx) => tx.fund_id === fund.id && tx.type === "fund_contribution").reduce((sum, tx) => sum + Number(tx.amount), 0);
+      const recent = transactions.filter((tx) => (tx.fund_id === fund.id && (tx.type === "fund_contribution" || tx.type === "fund_withdrawal")) || (tx.type === "surplus_payment" && tx.source_fund_id === fund.id)).slice(0, 3);
+      return <Button key={fund.id} variant="outline" onClick={() => onSelect(item.name)} className="h-auto min-h-32 flex-col items-stretch gap-2 whitespace-normal p-4 text-left">
+        <span className="flex justify-between gap-2"><span className="font-semibold">{fund.name}</span><ChevronRight className="h-4 w-4" /></span>
+        <span className="text-sm tabular-nums">{formatINR(contributed)} / {formatINR(item.planned)} this month</span>
+        <span className="text-sm text-muted-foreground">Overall balance · {formatINR(balance)}</span>
+        <span className="text-xs text-muted-foreground">{recent.length ? `Recent: ${recent.map((tx) => tx.description || tx.type.replaceAll("_", " ")).join(" · ")}` : "No recent movements"}</span>
+      </Button>;
+    })}
+  </CardContent></Card>;
+}
+
+function SipOverview({ items, monthTx, categories, funds, reserves, onSelect }: { items: DetailSubCategory[]; monthTx: TxRow[]; categories: CategoryRow[]; funds: FundRow[]; reserves: ReserveRow[]; onSelect: (name: string) => void }) {
+  return <Card><CardHeader className="pb-2"><CardTitle className="text-base">Monthly SIP instalments</CardTitle></CardHeader><CardContent className="divide-y divide-border">
+    {items.map((item) => {
+      const actual = monthTx.filter((tx) => tx.bucket === "SIP Investments" && subcategoryName(tx, categories, funds, reserves) === item.name).reduce((sum, tx) => sum + Number(tx.amount), 0);
+      return <Button key={item.name} variant="ghost" onClick={() => onSelect(item.name)} className={"h-auto min-h-14 w-full justify-between gap-3 rounded-none px-1 py-3 text-left " + (item.muted ? "opacity-60" : "")}>
+        <span className="min-w-0"><span className="block truncate text-sm font-medium">{item.name}</span><span className="text-xs text-muted-foreground">{item.muted ? "SIP ended" : `${actual >= item.planned && item.planned > 0 ? "Logged" : "Not yet logged"} · ${formatINR(item.planned)} monthly target`}</span></span>
+        <span className="shrink-0 text-sm tabular-nums">{formatINR(actual)}{item.planned > 0 ? ` / ${formatINR(item.planned)}` : ""}</span>
+      </Button>;
+    })}
+  </CardContent></Card>;
+}
+
+function FixedOverview({ items, onSelect }: { items: DetailSubCategory[]; onSelect: (name: string) => void }) {
+  return <Card><CardHeader className="pb-2"><CardTitle className="text-base">Commitment schedule</CardTitle></CardHeader><CardContent className="divide-y divide-border">
+    {items.map((item) => <Button key={item.name} variant="ghost" onClick={() => onSelect(item.name)} className={"h-auto min-h-12 w-full justify-between gap-3 rounded-none px-1 py-3 text-left " + (item.muted ? "opacity-60" : "")}><span className="text-sm font-medium">{item.name}<span className="ml-2 text-xs font-normal text-muted-foreground">{item.note}</span></span><span className="shrink-0 text-sm tabular-nums">{formatINR(item.planned)}</span></Button>)}
+  </CardContent></Card>;
+}
+
+function TaxOverview({ reserve, transactions, actual, planned }: { reserve: ReserveRow | undefined; transactions: TxRow[]; actual: number; planned: number }) {
+  const balance = reserve ? computeReserveBalance(reserve, transactions) : 0;
+  return <Card><CardContent className="grid gap-3 p-4 sm:grid-cols-3"><div><p className="text-xs text-muted-foreground">This month accrued</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatINR(actual)} / {formatINR(planned)}</p></div><div className="sm:col-span-2"><p className="text-xs text-muted-foreground">Total reserve accumulated</p><p className="mt-1 text-lg font-semibold tabular-nums">{formatINR(balance)}</p></div></CardContent></Card>;
+}
+
+function SubcategoryDetailView(props: DetailProps & { subCategory: string; onBack: () => void }) {
+  const { bucket, subCategory, monthTx, allTransactions, accounts, categories, funds, reserves, year, month, day, isCurrentMonth, isClosed, userId, onBack, onRefresh } = props;
+  const bucketLabel = bucketLabelFor(bucket);
+  const items = buildSubCategories(props);
+  const item = items.find((candidate) => candidate.name === subCategory) ?? { name: subCategory, planned: 0 };
+  const bucketTx = monthTx.filter((tx) => tx.bucket === bucketLabel && matchingSubcategory(tx, item, categories, funds, reserves));
+  const availableAccounts = accounts.filter((account) => bucketTx.some((tx) => tx.account_id === account.id));
+  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  const accountSignature = availableAccounts.map((a) => a.id).join("|");
+  useEffect(() => setSelectedAccounts(availableAccounts.map((a) => a.id)), [accountSignature]);
+  const selected = new Set(selectedAccounts);
+  const filtered = bucketTx.filter((tx) => selected.has(tx.account_id));
+  const actual = filtered.reduce((sum, tx) => sum + Number(tx.amount), 0);
+  const plan = bucket === "others" ? 0 : item.planned;
+  const days = new Date(year, month, 0).getDate();
+  const currentDaily = makeDailyTrend(filtered, year, month, 0).map((point) => ({ ...point, daily: point.daily }));
+  const trend = Array.from({ length: 6 }, (_, offset) => {
+    const date = new Date(year, month - 1 - (5 - offset), 1);
+    const prefix = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const amount = allTransactions.filter((tx) => tx.date.startsWith(prefix) && tx.bucket === bucketLabel && matchingSubcategory(tx, item, categories, funds, reserves) && selected.has(tx.account_id)).reduce((sum, tx) => sum + Number(tx.amount), 0);
+    return { month: date.toLocaleDateString("en-IN", { month: "short" }), amount };
+  });
+  const sorted = [...filtered].sort((a, b) => b.date.localeCompare(a.date) || Number(b.created_at ?? "") - Number(a.created_at ?? ""));
+  const editable = isCurrentMonth && !isClosed;
+  const accountNames = Object.fromEntries(accounts.map((account) => [account.id, account.name]));
+  const paymentRows = (props as DetailProps & { payments?: { transaction_id: string; payment_transaction_id: string | null }[] }).payments ?? [];
+  return <div className="space-y-5 animate-in fade-in slide-in-from-right-2 duration-200">
+    <BackBar label={subCategory} onBack={onBack} />
+    <section className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-2xl font-semibold">{subCategory}</h2><p className="mt-1 text-sm text-muted-foreground">{bucketLabel} · {isCurrentMonth ? `Day ${day} of ${days}` : "Read-only month view"}</p></div><div className="text-right"><div className="text-2xl font-semibold tabular-nums">{formatINR(actual)}{plan > 0 ? <span className="text-base font-normal text-muted-foreground"> / {formatINR(plan)}</span> : null}</div>{plan > 0 ? <p className={"mt-1 text-sm " + (actual > plan ? "text-destructive" : "text-muted-foreground")}>{actual > plan ? "Over budget" : "Within budget"}</p> : null}</div></section>
+    {plan > 0 ? <PaceProgress actual={actual} planned={plan} day={day} days={days} showMarker={isCurrentMonth} /> : null}
+    <Card><CardContent className="p-4"><div className="mb-2 text-xs font-medium uppercase text-muted-foreground">Accounts</div>{availableAccounts.length ? accountFilterPills(accounts, availableAccounts, selectedAccounts, setSelectedAccounts) : <p className="text-sm text-muted-foreground">No transactions for this sub-category in the selected month.</p>}</CardContent></Card>
+    <div className="grid gap-4 xl:grid-cols-2">
+      <DetailChart title="Daily spend" empty="No transactions yet for this month."><ResponsiveContainer width="100%" height="100%"><BarChart data={currentDaily} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}><CartesianGrid vertical={false} stroke="var(--border)" /><XAxis dataKey="day" tickLine={false} axisLine={false} /><YAxis tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} width={64} /><Tooltip labelFormatter={(v) => `Day ${v}`} formatter={(value) => formatINR(Number(value ?? 0))} /><Bar dataKey="daily" name="Spent" fill="var(--primary)" radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></DetailChart>
+      <DetailChart title="Six-month trend" empty="No spending history found."><ResponsiveContainer width="100%" height="100%"><LineChart data={trend} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}><CartesianGrid stroke="var(--border)" /><XAxis dataKey="month" tickLine={false} axisLine={false} /><YAxis tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} width={64} /><Tooltip formatter={(value) => formatINR(Number(value ?? 0))} /><Line dataKey="amount" name="Spent" type="monotone" stroke="var(--primary)" strokeWidth={2} dot={{ r: 3 }} /></LineChart></ResponsiveContainer></DetailChart>
+    </div>
+    <Card><CardHeader className="flex flex-row items-center justify-between gap-3 pb-2"><CardTitle className="text-base">Transactions</CardTitle>{editable ? <QuickAddDialog {...props} item={item} onSaved={onRefresh} /> : null}</CardHeader><CardContent><TransactionRows transactions={sorted} accounts={accounts} categories={categories} funds={funds} reserves={reserves} payments={paymentRows} editable={editable} onRefresh={onRefresh} userId={userId} accountNames={accountNames} /></CardContent></Card>
+  </div>;
+}
+
+function QuickAddDialog(props: DetailProps & { item: DetailSubCategory; onSaved: () => void }) {
+  const { bucket, item, accounts, categories, funds, reserves, userId, onSaved } = props;
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [description, setDescription] = useState("");
+  const [paymentMode, setPaymentMode] = useState("");
+  const defaultCode = bucket === "sip" ? "HDFC" : bucket === "regular" || bucket === "others" ? "CUB" : "SBI";
+  const [accountId, setAccountId] = useState(accounts.find((a) => a.code === defaultCode)?.id ?? accounts[0]?.id ?? "");
+  const [busy, setBusy] = useState(false);
+  const type = bucket === "funds" ? "fund_contribution" : bucket === "tax" ? "reserve_accrual" : "expense";
+  async function save() {
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value <= 0 || !date || !accountId) { toast.error("Enter a date, account, and positive amount."); return; }
+    const row: Record<string, unknown> = { user_id: userId, date, type, amount: value, description: description.trim(), payment_mode: paymentMode.trim() || null, account_id: accountId, destination_account_id: null, category_id: null, fund_id: null, reserve_id: null, bucket: bucketLabelFor(bucket), sub_category: item.name, is_credit_card: false, credit_card_paid_amount: 0, credit_card_payment_status: null };
+    if (bucket === "regular" || bucket === "fixed") {
+      const category = categories.find((c) => c.id === item.categoryId || c.name === item.name);
+      if (!category) { toast.error("This category is no longer available."); return; }
+      row.category_id = category.id;
+    }
+    if (bucket === "funds") {
+      const fund = funds.find((f) => f.id === item.fundId || f.name === item.name);
+      if (!fund) { toast.error("This fund is no longer available."); return; }
+      row.fund_id = fund.id;
+      row.account_id = fund.account_id;
+    }
+    if (bucket === "tax") {
+      const reserve = reserves.find((r) => r.name.toLowerCase().includes("tax"));
+      if (!reserve) { toast.error("Tax Reserve is not configured."); return; }
+      row.reserve_id = reserve.id;
+      row.account_id = reserve.account_id;
+    }
+    setBusy(true);
+    const { error } = await supabase.from("transactions").insert(row as never);
+    setBusy(false);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Transaction saved");
+    setOpen(false);
+    setAmount("");
+    setDescription("");
+    setPaymentMode("");
+    onSaved();
+  }
+  return <><Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> Add transaction</Button><Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md"><DialogHeader><DialogTitle>Add transaction · {item.name}</DialogTitle></DialogHeader><div className="grid gap-3">
+    <div><Label className="mb-1.5 block text-xs text-muted-foreground">Bucket</Label><Input value={bucketLabelFor(bucket)} readOnly /></div>
+    <div><Label className="mb-1.5 block text-xs text-muted-foreground">Sub-category</Label><Input value={item.name} readOnly /></div>
+    <div><Label className="mb-1.5 block text-xs text-muted-foreground">Account</Label><Select value={accountId} onValueChange={setAccountId}><SelectTrigger><SelectValue placeholder="Choose account" /></SelectTrigger><SelectContent>{accounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>)}</SelectContent></Select></div>
+    <div className="grid grid-cols-2 gap-3"><div><Label className="mb-1.5 block text-xs text-muted-foreground">Amount (₹)</Label><Input type="number" min="0" step="0.01" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></div><div><Label className="mb-1.5 block text-xs text-muted-foreground">Date</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div></div>
+    <div><Label className="mb-1.5 block text-xs text-muted-foreground">Description</Label><Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" /></div>
+    <div><Label className="mb-1.5 block text-xs text-muted-foreground">Payment mode</Label><Input value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)} placeholder="Optional" /></div>
+  </div><DialogFooter><Button onClick={save} disabled={busy}>{busy ? "Saving…" : "Save transaction"}</Button></DialogFooter></DialogContent></Dialog></>;
+}
+
+function TransactionRows({ transactions, accounts, categories, funds, reserves, payments, editable, onRefresh, userId, accountNames }: { transactions: TxRow[]; accounts: AccountRow[]; categories: CategoryRow[]; funds: FundRow[]; reserves: ReserveRow[]; payments: { transaction_id: string; payment_transaction_id: string | null }[]; editable: boolean; onRefresh: () => void; userId: string; accountNames?: Record<string, string> }) {
+  const [editing, setEditing] = useState<TxRow | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<TxRow | null>(null);
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState("");
+  const [description, setDescription] = useState("");
+  const [paymentMode, setPaymentMode] = useState("");
+  const [busy, setBusy] = useState(false);
+  function beginEdit(tx: TxRow) { setEditing(tx); setAmount(String(tx.amount)); setDate(tx.date); setDescription(tx.description ?? ""); setPaymentMode(tx.payment_mode ?? ""); }
+  async function saveEdit() {
+    if (!editing) return;
+    const value = Number(amount);
+    if (!Number.isFinite(value) || value <= 0 || !date) { toast.error("Enter a date and a positive amount."); return; }
+    if (value < Number(editing.credit_card_paid_amount ?? 0)) { toast.error("Amount cannot be lower than payments already logged."); return; }
+    setBusy(true);
+    const { error } = await supabase.from("transactions").update({ amount: value, date, description: description.trim(), payment_mode: paymentMode.trim() || null }).eq("id", editing.id);
+    setBusy(false);
+    if (error) { toast.error(error.message); return; }
+    setEditing(null); toast.success("Transaction updated"); onRefresh();
+  }
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    setBusy(true);
+    try {
+      if (pendingDelete.is_credit_card) {
+        const paymentIds = payments.filter((p) => p.transaction_id === pendingDelete.id).map((p) => p.payment_transaction_id).filter((id): id is string => !!id);
+        await deleteCreditCardTransaction(pendingDelete.id, paymentIds);
+      } else {
+        const { error } = await supabase.from("transactions").delete().eq("id", pendingDelete.id);
+        if (error) throw error;
+      }
+      setPendingDelete(null); toast.success("Transaction deleted"); onRefresh();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not delete transaction"); }
+    setBusy(false);
+  }
+  const paid = pendingDelete ? Number(pendingDelete.credit_card_paid_amount ?? 0) : 0;
+  return <>
+    {transactions.length ? <ul className="divide-y divide-border">{transactions.map((tx) => <li key={tx.id} className="flex items-start justify-between gap-3 py-3">
+      <div className="min-w-0"><p className="truncate text-sm font-medium">{tx.description || tx.sub_category || "Transaction"}</p><p className="mt-0.5 text-xs text-muted-foreground">{formatDate(tx.date)} · {accountNames?.[tx.account_id] ?? accounts.find((a) => a.id === tx.account_id)?.name ?? "Account"}{tx.payment_mode ? ` · ${tx.payment_mode}` : ""}</p></div>
+      <div className="flex shrink-0 items-center gap-2"><span className="text-sm font-medium tabular-nums">{formatINR(Number(tx.amount))}</span>{editable ? <><Button variant="ghost" size="icon" aria-label="Edit transaction" title="Edit transaction" onClick={() => beginEdit(tx)}><Pencil /></Button><Button variant="ghost" size="icon" aria-label="Delete transaction" title="Delete transaction" onClick={() => setPendingDelete(tx)}><Trash2 /></Button></> : null}</div>
+    </li>)}</ul> : <p className="py-5 text-sm text-muted-foreground">No transactions in this sub-category for the selected month.</p>}
+    <Dialog open={!!editing} onOpenChange={(open) => { if (!open) setEditing(null); }}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Edit transaction</DialogTitle></DialogHeader><div className="grid gap-3"><div><Label className="mb-1.5 block text-xs text-muted-foreground">Amount (₹)</Label><Input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} /></div><div><Label className="mb-1.5 block text-xs text-muted-foreground">Date</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div><div><Label className="mb-1.5 block text-xs text-muted-foreground">Description</Label><Input value={description} onChange={(e) => setDescription(e.target.value)} /></div><div><Label className="mb-1.5 block text-xs text-muted-foreground">Payment mode</Label><Input value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)} /></div></div><DialogFooter><Button onClick={saveEdit} disabled={busy}>{busy ? "Saving…" : "Save changes"}</Button></DialogFooter></DialogContent></Dialog>
+    <AlertDialog open={!!pendingDelete} onOpenChange={(open) => { if (!open) setPendingDelete(null); }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Delete this transaction?</AlertDialogTitle><AlertDialogDescription>{pendingDelete?.is_credit_card && paid > 0 ? `This transaction has ${formatINR(paid)} in payments logged. Deleting it will also remove those payment records and reverse the account balance adjustments. Proceed?` : "This cannot be undone."}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel><AlertDialogAction onClick={(event) => { event.preventDefault(); void confirmDelete(); }} disabled={busy}>{busy ? "Deleting…" : "Delete"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+  </>;
 }
 
 // ---------- Level 1 ----------
