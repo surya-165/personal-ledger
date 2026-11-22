@@ -1,11 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, ChevronLeft, ChevronRight, Lock, Minus, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { computeFundBalance, computeReserveBalance, fetchAll, seedIfEmpty, formatINR, type AccountRow, type CategoryRow, type FundRow, type ReserveRow, type TxRow } from "@/lib/finance-db";
+import { computeFundBalance, computeReserveBalance, fetchAll, seedIfEmpty, formatINR, type AccountRow, type CategoryRow, type CreditCardPaymentRow, type FundRow, type ReserveRow, type TxRow } from "@/lib/finance-db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { deleteCreditCardTransaction } from "@/components/finance/credit-card-payment-dialog";
+import { toast } from "sonner";
 import { RecurringPanel } from "@/components/finance/recurring-panel";
 import { CloseMonthDialog, type BucketFigure } from "@/components/finance/close-month-dialog";
 import { fetchClosures, monthKey, lastDayOfMonth } from "@/lib/month-close";
@@ -262,6 +263,8 @@ function Dashboard() {
 
   const expectedItems: ExpectedItem[] = [];
   if (isCurrentMonth) {
+    const regularRemaining = Math.max(0, plannedRegular - actualRegular);
+    if (regularRemaining > 0) expectedItems.push({ label: "Regular Expenses allocation", amount: regularRemaining, bucket: "regular" });
     for (const investment of activeInvestments) {
       const remaining = Math.max(0, Number(investment.monthly_amount ?? 0) - (actualSIPByInvestment[investment.id] ?? 0));
       if (remaining > 0) expectedItems.push({ label: investment.name, amount: remaining, bucket: "sip" });
@@ -473,6 +476,7 @@ function Dashboard() {
             label={bucketRows.find((row) => row.key === level.bucket)?.label ?? "Bucket"}
             monthTx={monthTx}
             allTransactions={data.transactions}
+            payments={data.creditCardPayments}
             accounts={[...data.accounts, ...(data.creditCardAccount ? [data.creditCardAccount] : [])]}
             categories={categories}
             funds={funds}
@@ -505,6 +509,7 @@ function Dashboard() {
             subCategory={level.subCategory}
             monthTx={monthTx}
             allTransactions={data.transactions}
+            payments={data.creditCardPayments}
             accounts={[...data.accounts, ...(data.creditCardAccount ? [data.creditCardAccount] : [])]}
             categories={categories}
             funds={funds}
@@ -731,6 +736,7 @@ interface DetailProps {
   bucket: DetailBucket;
   monthTx: TxRow[];
   allTransactions: TxRow[];
+  payments: CreditCardPaymentRow[];
   accounts: AccountRow[];
   categories: CategoryRow[];
   funds: FundRow[];
@@ -855,7 +861,6 @@ function BucketDetailView(props: DetailProps & { label: string; onBack: () => vo
   const actual = filtered.reduce((sum, tx) => sum + Number(tx.amount), 0);
   const currentTrend = makeDailyTrend(filtered, year, month, planned);
   const dayCount = new Date(year, month, 0).getDate();
-  const currentMonthPrefix = `${year}-${String(month).padStart(2, "0")}`;
   const comparisonRows = selectedItems.map((item) => {
     const values = [];
     for (let offset = 0; offset <= 3; offset++) {
@@ -890,32 +895,31 @@ function BucketDetailView(props: DetailProps & { label: string; onBack: () => vo
         })}</div></div>
       </CardContent></Card>
 
-      {bucket === "funds" ? <FundOverview items={items} funds={funds} transactions={allTransactions} monthTx={bucketTx} onSelect={onSelectSubCategory} /> : null}
-      {bucket === "sip" ? <SipOverview items={items} monthTx={bucketTx} categories={categories} funds={funds} reserves={reserves} onSelect={onSelectSubCategory} /> : null}
-      {bucket === "fixed" ? <FixedOverview items={items} onSelect={onSelectSubCategory} /> : null}
+      {bucket === "funds" ? <FundOverview items={selectedItems} funds={funds} transactions={allTransactions} monthTx={filtered} onSelect={onSelectSubCategory} /> : null}
+      {bucket === "sip" ? <SipOverview items={selectedItems} monthTx={filtered} categories={categories} funds={funds} reserves={reserves} onSelect={onSelectSubCategory} /> : null}
+      {bucket === "fixed" ? <FixedOverview items={selectedItems} onSelect={onSelectSubCategory} /> : null}
       {bucket === "tax" ? <TaxOverview reserve={taxReserve} transactions={allTransactions} actual={actual} planned={props.plannedTax} /> : null}
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <DetailChart title="Spend by account" empty="No spending for the selected accounts.">
+        <DetailChart title="Spend by account" empty="No spending for the selected accounts." noData={spendByAccount.length === 0}>
           <ResponsiveContainer width="100%" height="100%"><BarChart data={spendByAccount} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}><CartesianGrid vertical={false} stroke="var(--border)" /><XAxis dataKey="name" tickLine={false} axisLine={false} /><YAxis tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} width={64} /><Tooltip formatter={(value) => formatINR(Number(value ?? 0))} /><Bar dataKey="amount" name="Spend" fill="var(--primary)" radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer>
         </DetailChart>
-        <DetailChart title="Spend by sub-category" empty="No sub-categories match these filters.">
-          <ResponsiveContainer width="100%" height="100%"><BarChart data={spendByCategory} layout="vertical" margin={{ left: 12, right: 16, top: 8, bottom: 8 }}><CartesianGrid horizontal={false} stroke="var(--border)" /><XAxis type="number" tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} /><YAxis type="category" dataKey="name" width={112} tickLine={false} axisLine={false} /><Tooltip formatter={(value) => formatINR(Number(value ?? 0))} /><Bar dataKey="planned" name="Planned" fill="var(--muted-foreground)" radius={[0, 3, 3, 0]} /><Bar dataKey="amount" name="Actual" fill="var(--primary)" radius={[0, 3, 3, 0]} onClick={(row) => onSelectSubCategory(String(row.name))} /></BarChart></ResponsiveContainer>
+        <DetailChart title="Spend by sub-category" empty="No sub-categories match these filters." noData={spendByCategory.length === 0}>
+          <ResponsiveContainer width="100%" height="100%"><BarChart data={spendByCategory} layout="vertical" margin={{ left: 12, right: 16, top: 8, bottom: 8 }}><CartesianGrid horizontal={false} stroke="var(--border)" /><XAxis type="number" tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} /><YAxis type="category" dataKey="name" width={112} tickLine={false} axisLine={false} /><Tooltip formatter={(value) => formatINR(Number(value ?? 0))} /><Bar dataKey="planned" name="Planned" fill="var(--muted-foreground)" radius={[0, 3, 3, 0]} /><Bar dataKey="amount" name="Actual" fill="var(--primary)" radius={[0, 3, 3, 0]} onClick={(row) => onSelectSubCategory(String(row.name))}>{spendByCategory.map((entry) => <Cell key={entry.name} fill={entry.planned > 0 && entry.amount > entry.planned ? "var(--destructive)" : "var(--primary)"} />)}</Bar></BarChart></ResponsiveContainer>
         </DetailChart>
       </div>
 
-      <DetailChart title="Daily cumulative spend" empty="No transactions yet for this month.">
+      <DetailChart title="Daily cumulative spend" empty="No transactions yet for this month." noData={filtered.length === 0}>
         <ResponsiveContainer width="100%" height="100%"><LineChart data={currentTrend} margin={{ left: 8, right: 16, top: 10, bottom: 0 }}><CartesianGrid stroke="var(--border)" /><XAxis dataKey="day" tickLine={false} axisLine={false} /><YAxis tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} width={64} /><Tooltip labelFormatter={(v) => `Day ${v}`} formatter={(value) => formatINR(Number(value ?? 0))} /><Line dataKey="actual" name="Actual" type="monotone" stroke="var(--primary)" strokeWidth={2} dot={false} /><Line dataKey="ideal" name="Ideal pace" type="monotone" stroke="var(--chart-3)" strokeDasharray="5 4" dot={false} /></LineChart></ResponsiveContainer>
       </DetailChart>
 
-      <DetailChart title="This month vs recent months" empty="No sub-category comparison data.">
+      <DetailChart title="This month vs recent months" empty="No sub-category comparison data." noData={comparisonRows.length === 0}>
         <ResponsiveContainer width="100%" height="100%"><BarChart data={comparisonRows} layout="vertical" margin={{ left: 12, right: 16, top: 8, bottom: 8 }}><CartesianGrid horizontal={false} stroke="var(--border)" /><XAxis type="number" tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} /><YAxis type="category" dataKey="name" width={112} tickLine={false} axisLine={false} /><Tooltip formatter={(value) => formatINR(Number(value ?? 0))} /><Bar dataKey="current" name="Selected month" fill="var(--primary)" radius={[0, 3, 3, 0]} /><Bar dataKey="last" name="Previous month" fill="var(--chart-2)" radius={[0, 3, 3, 0]} /><Bar dataKey="average" name="3-month average" fill="var(--chart-3)" radius={[0, 3, 3, 0]} /></BarChart></ResponsiveContainer>
       </DetailChart>
 
       <Card><CardHeader className="pb-2"><CardTitle className="text-base">Top transactions</CardTitle></CardHeader><CardContent>
         {topTransactions.length ? <TransactionRows transactions={topTransactions} accounts={accounts} categories={categories} funds={funds} reserves={reserves} payments={[]} editable={false} onRefresh={() => undefined} userId={props.userId} /> : <p className="py-4 text-sm text-muted-foreground">No transactions match these filters.</p>}
       </CardContent></Card>
-      <p className="hidden">{currentMonthPrefix}</p>
       {editable ? null : <p className="text-xs text-muted-foreground">This month is read-only.</p>}
     </div>
   );
@@ -925,9 +929,8 @@ function compactINR(value: number) {
   return new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
-function DetailChart({ title, empty, children }: { title: string; empty: string; children: React.ReactNode }) {
-  const hasData = React.Children.count(children) > 0;
-  return <Card className="min-w-0"><CardHeader className="pb-2"><CardTitle className="text-base">{title}</CardTitle></CardHeader><CardContent><div className="h-64 min-w-0 w-full">{hasData ? children : <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{empty}</div>}</div></CardContent></Card>;
+function DetailChart({ title, empty, children, noData = false }: { title: string; empty: string; children: ReactNode; noData?: boolean }) {
+  return <Card className="min-w-0"><CardHeader className="pb-2"><CardTitle className="text-base">{title}</CardTitle></CardHeader><CardContent><div className="h-64 min-w-0 w-full">{noData ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{empty}</div> : children}</div></CardContent></Card>;
 }
 
 function FundOverview({ items, funds, transactions, monthTx, onSelect }: { items: DetailSubCategory[]; funds: FundRow[]; transactions: TxRow[]; monthTx: TxRow[]; onSelect: (name: string) => void }) {
@@ -942,7 +945,7 @@ function FundOverview({ items, funds, transactions, monthTx, onSelect }: { items
         <span className="flex justify-between gap-2"><span className="font-semibold">{fund.name}</span><ChevronRight className="h-4 w-4" /></span>
         <span className="text-sm tabular-nums">{formatINR(contributed)} / {formatINR(item.planned)} this month</span>
         <span className="text-sm text-muted-foreground">Overall balance · {formatINR(balance)}</span>
-        <span className="text-xs text-muted-foreground">{recent.length ? `Recent: ${recent.map((tx) => tx.description || tx.type.replaceAll("_", " ")).join(" · ")}` : "No recent movements"}</span>
+        <span className="text-xs text-muted-foreground">{recent.length ? `Recent: ${recent.map((tx) => `${formatDate(tx.date)} ${formatINR(Number(tx.amount))}`).join(" · ")}` : "No recent movements"}</span>
       </Button>;
     })}
   </CardContent></Card>;
@@ -972,7 +975,7 @@ function TaxOverview({ reserve, transactions, actual, planned }: { reserve: Rese
 }
 
 function SubcategoryDetailView(props: DetailProps & { subCategory: string; onBack: () => void }) {
-  const { bucket, subCategory, monthTx, allTransactions, accounts, categories, funds, reserves, year, month, day, isCurrentMonth, isClosed, userId, onBack, onRefresh } = props;
+  const { bucket, subCategory, monthTx, allTransactions, accounts, categories, funds, reserves, year, month, day, isCurrentMonth, isClosed, userId, onBack, onRefresh, payments } = props;
   const bucketLabel = bucketLabelFor(bucket);
   const items = buildSubCategories(props);
   const item = items.find((candidate) => candidate.name === subCategory) ?? { name: subCategory, planned: 0 };
@@ -986,27 +989,27 @@ function SubcategoryDetailView(props: DetailProps & { subCategory: string; onBac
   const actual = filtered.reduce((sum, tx) => sum + Number(tx.amount), 0);
   const plan = bucket === "others" ? 0 : item.planned;
   const days = new Date(year, month, 0).getDate();
-  const currentDaily = makeDailyTrend(filtered, year, month, 0).map((point) => ({ ...point, daily: point.daily }));
+  const currentDaily = makeDailyTrend(filtered, year, month, 0);
   const trend = Array.from({ length: 6 }, (_, offset) => {
     const date = new Date(year, month - 1 - (5 - offset), 1);
     const prefix = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
     const amount = allTransactions.filter((tx) => tx.date.startsWith(prefix) && tx.bucket === bucketLabel && matchingSubcategory(tx, item, categories, funds, reserves) && selected.has(tx.account_id)).reduce((sum, tx) => sum + Number(tx.amount), 0);
     return { month: date.toLocaleDateString("en-IN", { month: "short" }), amount };
   });
-  const sorted = [...filtered].sort((a, b) => b.date.localeCompare(a.date) || Number(b.created_at ?? "") - Number(a.created_at ?? ""));
+  const sorted = [...filtered].sort((a, b) => b.date.localeCompare(a.date) || (b.created_at ?? "").localeCompare(a.created_at ?? ""));
   const editable = isCurrentMonth && !isClosed;
   const accountNames = Object.fromEntries(accounts.map((account) => [account.id, account.name]));
-  const paymentRows = (props as DetailProps & { payments?: { transaction_id: string; payment_transaction_id: string | null }[] }).payments ?? [];
+  const paymentRows = payments;
   return <div className="space-y-5 animate-in fade-in slide-in-from-right-2 duration-200">
     <BackBar label={subCategory} onBack={onBack} />
-    <section className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-2xl font-semibold">{subCategory}</h2><p className="mt-1 text-sm text-muted-foreground">{bucketLabel} · {isCurrentMonth ? `Day ${day} of ${days}` : "Read-only month view"}</p></div><div className="text-right"><div className="text-2xl font-semibold tabular-nums">{formatINR(actual)}{plan > 0 ? <span className="text-base font-normal text-muted-foreground"> / {formatINR(plan)}</span> : null}</div>{plan > 0 ? <p className={"mt-1 text-sm " + (actual > plan ? "text-destructive" : "text-muted-foreground")}>{actual > plan ? "Over budget" : "Within budget"}</p> : null}</div></section>
+    <section className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-2xl font-semibold">{subCategory}</h2><p className="mt-1 text-sm text-muted-foreground">{bucketLabel} · {isCurrentMonth ? `Day ${day} of ${days}` : "Read-only month view"}</p></div><div className="text-right"><div className="text-2xl font-semibold tabular-nums">{formatINR(actual)}{plan > 0 ? <span className="text-base font-normal text-muted-foreground"> / {formatINR(plan)}</span> : null}</div>{plan > 0 ? <p className={"mt-1 text-sm " + (actual > plan ? "text-destructive" : isCurrentMonth && actual > plan * day / days * 1.1 ? "text-warning" : "text-muted-foreground")}>{actual > plan ? "Over budget" : isCurrentMonth && actual > plan * day / days * 1.1 ? "Ahead of pace" : "On track"}</p> : null}</div></section>
     {plan > 0 ? <PaceProgress actual={actual} planned={plan} day={day} days={days} showMarker={isCurrentMonth} /> : null}
     <Card><CardContent className="p-4"><div className="mb-2 text-xs font-medium uppercase text-muted-foreground">Accounts</div>{availableAccounts.length ? accountFilterPills(accounts, availableAccounts, selectedAccounts, setSelectedAccounts) : <p className="text-sm text-muted-foreground">No transactions for this sub-category in the selected month.</p>}</CardContent></Card>
     <div className="grid gap-4 xl:grid-cols-2">
-      <DetailChart title="Daily spend" empty="No transactions yet for this month."><ResponsiveContainer width="100%" height="100%"><BarChart data={currentDaily} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}><CartesianGrid vertical={false} stroke="var(--border)" /><XAxis dataKey="day" tickLine={false} axisLine={false} /><YAxis tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} width={64} /><Tooltip labelFormatter={(v) => `Day ${v}`} formatter={(value) => formatINR(Number(value ?? 0))} /><Bar dataKey="daily" name="Spent" fill="var(--primary)" radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></DetailChart>
-      <DetailChart title="Six-month trend" empty="No spending history found."><ResponsiveContainer width="100%" height="100%"><LineChart data={trend} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}><CartesianGrid stroke="var(--border)" /><XAxis dataKey="month" tickLine={false} axisLine={false} /><YAxis tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} width={64} /><Tooltip formatter={(value) => formatINR(Number(value ?? 0))} /><Line dataKey="amount" name="Spent" type="monotone" stroke="var(--primary)" strokeWidth={2} dot={{ r: 3 }} /></LineChart></ResponsiveContainer></DetailChart>
+      <DetailChart title="Daily spend" empty="No transactions yet for this month." noData={filtered.length === 0}><ResponsiveContainer width="100%" height="100%"><BarChart data={currentDaily} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}><CartesianGrid vertical={false} stroke="var(--border)" /><XAxis dataKey="day" tickLine={false} axisLine={false} /><YAxis tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} width={64} /><Tooltip labelFormatter={(v) => `Day ${v}`} formatter={(value) => formatINR(Number(value ?? 0))} /><Bar dataKey="daily" name="Spent" fill="var(--primary)" radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></DetailChart>
+      <DetailChart title="Six-month trend" empty="No spending history found." noData={trend.every((point) => point.amount === 0)}><ResponsiveContainer width="100%" height="100%"><LineChart data={trend} margin={{ left: 8, right: 8, top: 8, bottom: 0 }}><CartesianGrid stroke="var(--border)" /><XAxis dataKey="month" tickLine={false} axisLine={false} /><YAxis tickFormatter={(v) => compactINR(Number(v))} tickLine={false} axisLine={false} width={64} /><Tooltip formatter={(value) => formatINR(Number(value ?? 0))} /><Line dataKey="amount" name="Spent" type="monotone" stroke="var(--primary)" strokeWidth={2} dot={{ r: 3 }} /></LineChart></ResponsiveContainer></DetailChart>
     </div>
-    <Card><CardHeader className="flex flex-row items-center justify-between gap-3 pb-2"><CardTitle className="text-base">Transactions</CardTitle>{editable ? <QuickAddDialog {...props} item={item} onSaved={onRefresh} /> : null}</CardHeader><CardContent><TransactionRows transactions={sorted} accounts={accounts} categories={categories} funds={funds} reserves={reserves} payments={paymentRows} editable={editable} onRefresh={onRefresh} userId={userId} accountNames={accountNames} /></CardContent></Card>
+    <Card><CardHeader className="flex flex-row items-center justify-between gap-3 pb-2"><CardTitle className="text-base">Transactions</CardTitle>{editable && !item.muted ? <QuickAddDialog {...props} item={item} onSaved={onRefresh} /> : null}</CardHeader><CardContent><TransactionRows transactions={sorted} accounts={accounts} categories={categories} funds={funds} reserves={reserves} payments={paymentRows} editable={editable} onRefresh={onRefresh} userId={userId} accountNames={accountNames} /></CardContent></Card>
   </div>;
 }
 
@@ -1024,7 +1027,9 @@ function QuickAddDialog(props: DetailProps & { item: DetailSubCategory; onSaved:
   async function save() {
     const value = Number(amount);
     if (!Number.isFinite(value) || value <= 0 || !date || !accountId) { toast.error("Enter a date, account, and positive amount."); return; }
-    const row: Record<string, unknown> = { user_id: userId, date, type, amount: value, description: description.trim(), payment_mode: paymentMode.trim() || null, account_id: accountId, destination_account_id: null, category_id: null, fund_id: null, reserve_id: null, bucket: bucketLabelFor(bucket), sub_category: item.name, is_credit_card: false, credit_card_paid_amount: 0, credit_card_payment_status: null };
+    const chosenAccount = accounts.find((account) => account.id === accountId);
+    const creditCardExpense = type === "expense" && chosenAccount?.code === "CCARD";
+    const row: Record<string, unknown> = { user_id: userId, date, type, amount: value, description: description.trim(), payment_mode: paymentMode.trim() || null, account_id: accountId, destination_account_id: null, category_id: null, fund_id: null, reserve_id: null, bucket: bucketLabelFor(bucket), sub_category: item.name, is_credit_card: creditCardExpense, credit_card_paid_amount: 0, credit_card_payment_status: creditCardExpense ? "unpaid" : null };
     if (bucket === "regular" || bucket === "fixed") {
       const category = categories.find((c) => c.id === item.categoryId || c.name === item.name);
       if (!category) { toast.error("This category is no longer available."); return; }
