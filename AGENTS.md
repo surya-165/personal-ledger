@@ -1,10 +1,9 @@
-<!-- LOVABLE:BEGIN -->
-> [!IMPORTANT]
-> This project is connected to [Lovable](https://lovable.dev). Avoid rewriting
-> published git history — force pushing, or rebasing/amending/squashing commits
-> that are already pushed — as it rewrites history on Lovable's side and the
-> user will likely lose their project history.
->
-> Commits you push to the connected branch sync back to Lovable and show up in
-> the editor, so keep the branch in a working state.
-<!-- LOVABLE:END -->
+# Personal Ledger
+
+Standalone copy of the app originally built in Lovable (repo `kanakku-vazhakku`).
+This repo is NOT connected to Lovable: it runs on its own Supabase project and
+deploys to Vercel. Never push to or change the original Lovable repo or database.
+
+- Build target is Vercel, set by `nitro: { preset: "vercel" }` in `vite.config.ts`.
+- Environment variables are listed in `.env.example`; real values live in Vercel.
+- Database schema lives in `supabase/migrations/`.
